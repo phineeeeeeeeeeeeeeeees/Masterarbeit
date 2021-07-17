@@ -1,0 +1,27 @@
+{
+    "id": "A383B7C5",
+    "path": "/Masterarbeit/analysis/2_scripts/monthly_lmer.R",
+    "project_path": "2_scripts/monthly_lmer.R",
+    "type": "r_source",
+    "hash": "643271069",
+    "contents": "",
+    "dirty": false,
+    "created": 1625664545645.0,
+    "source_on_save": false,
+    "relative_order": 16,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "375,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1626250346,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1626250346629,
+    "read_only": false,
+    "read_only_alternatives": []
+}

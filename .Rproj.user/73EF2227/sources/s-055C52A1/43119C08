@@ -1,0 +1,27 @@
+{
+    "id": "43119C08",
+    "path": "/Masterarbeit/analysis/2_scripts/annual_SLR.R",
+    "project_path": "2_scripts/annual_SLR.R",
+    "type": "r_source",
+    "hash": "696580575",
+    "contents": "",
+    "dirty": false,
+    "created": 1624955314210.0,
+    "source_on_save": false,
+    "relative_order": 11,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "412,1",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1626115684,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1626115684830,
+    "read_only": false,
+    "read_only_alternatives": []
+}

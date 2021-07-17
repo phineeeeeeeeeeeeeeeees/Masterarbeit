@@ -1,0 +1,927 @@
+---
+title: "Imputation model for TROPOMI-NO2 observations"
+author: "Tze-Li Liu"
+date: "5/24/2021"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+---
+The availability of satellite-based atmospheric column observations are limited by the surface and meteorological conditions of the sensing date, and therefore missing values (pixels) exist in the dataset. Before using these satellite-derived observations as input variables to model the ground-level NO2 concentration, the missing pixels should be first imputed. In principle, the method is to model the relationship between the satellite atmospheric column observation and some covariates (which do not come with missing values) using the pixel-days without missing values, and to implement this model to predict the missing pixels in the satellite-based atmospheric column observation datasets. This document demonstrates the development and implementation of the imputation model for the TROPOMI-NO2 product. 
+
+```{R message=FALSE, warning=FALSE}
+library(stars) ; library(sf) ; library(raster)
+library(dplyr) ; library(tidyr) 
+library(ggplot2) ; library(ggsci)
+library(lubridate) ; library(stringr)
+library(randomForest) ; library(ranger)
+```
+
+```{R echo = FALSE}
+knitr::opts_knit$set(root.dir = "/Masterarbeit/analysis")
+```
+
+```{R echo = FALSE}
+load("3_results/output-data/imputation-TROPOMI/working-environment.RData")
+```
+
+***
+
+# Data preparation
+
+Based on literature reviews, the following variables are selected to model the missing TROPOMI NO2 observations. 
+* CAMS Global Reanalysis data (modeled-NO2 and NO) at various time (00, 03, 06, 09, 12, 15, 18, 21)  
+* ERA5 meteorological variables at various time (00, 03, 06, 09, 12, 15, 18, 21)  
+  * temperature at 2m, surface pressure, total precipitation, boundary layer height, total cloud cover, wind speed and wind direction (calculated from u and v wind components)  
+* altitude (EU-DEM v1.1)  
+* coordinates of the cells: x, y  
+* Day Of Year  
+
+## Import datasets
+
+### TROPOMI data
+
+```{R eval = FALSE}
+# file paths
+files_TROPOMI <- list.files("1_data/raw/TROPOMI-NO2/preprocessed_resampled" , "_AOI_rs.tif$" , full.names = TRUE)
+# timestamps
+ts_TROPOMI_raw <- basename(files_TROPOMI) %>% 
+  str_extract("\\d{8}") %>% 
+  as_date()
+# read as a 3D array: x, y, date
+TROPOMI_raw <- read_stars(files_TROPOMI , 
+                          along = list(date = ts_TROPOMI_raw) , 
+                          proxy = FALSE) %>% 
+  st_set_dimensions(values = rep(c("NO2" , "QA")) , "band") %>% 
+  # !! screen NO2 pixels using QA_value > 0.75 !!
+  split("band") %>%  # split dimension "band" into attributes: NO2 and QA
+  transmute(value = ifelse(QA>0.75 , NO2 , NA_real_)) # filter NO2 values based on QA values
+```
+
+```{R echo = FALSE}
+TROPOMI_raw
+```
+
+The dataset is a 3D spatialtemporal array datacube (`stars`). 
+
+### Predictor variables
+
+#### CAMS
+
+```{R eval = FALSE}
+# 3D array: x, y, time 
+CAMS_raw <- read_stars("1_data/raw/ECMWF-CAMS-NO2/CAMS-NO2.nc") %>%
+  st_set_crs(st_crs(4326)) # long-lat coordinates
+```
+
+#### Elevation
+
+```{R eval = FALSE}
+# 2D array: x, y
+DEM_raw <- read_stars("1_data/raw/EU-DEM-1.1/eu_dem_v11_E40N20_AOI.tif")
+```
+
+#### ERA5 meteorological variables
+
+```{R eval = FALSE}
+# 3D array: x, y, time 
+ERA_raw <- read_stars("1_data/raw/ECMWF-ERA5/ERA5-meteorology.nc") %>% 
+  st_set_crs(st_crs(4326)) # long-lat coordinates
+```
+
+### Area of interest (boundary)
+
+```{R eval = FALSE}
+CH <- st_read("1_data/raw/Switzerland_shapefile/CHE_adm0.shp") %>% 
+  st_geometry() %>% 
+  st_simplify(preserveTopology = TRUE , dTolerance = 0.05)
+AOI <- st_read("1_data/raw/Switzerland_shapefile/AOI_4326.shp") 
+```
+
+## Resample and reshape spatialtemporal- and spatial datasets
+
+To do the calculation and modeling based on spatially and/or temporally co-locating pixels of the various predictor variables, all of the datasets need to have the same spatial dimensions (x,y aka spatial resolution and coordinate systems) and/or temporal dimension (daily).  
+For the imputation model of TROPOMI-NO2, all the predictor variables are resampled and reshaped to the dimension of TROPOMI, which is:  
+
+* spatial resolution: 0.13˚*0.09˚  
+* temporal resolution: daily * 365 days  
+
+Here are the resampling methods applied at this step:  
+
+* Continuous data  
+  * Upscaling (finer grids to lower grids): bilinear interpolation resampling
+  * Downscaling (coarser grids to finer grids): nearest neighbor resampling (a conservative transformation of the raw values without making assumptions)  
+
+### CAMS
+
+Downscaling with nearest neighbor resampling
+
+```{R eval = FALSE}
+CAMS_rsNN <- CAMS_raw %>% 
+  st_warp(dest = TROPOMI_raw) 
+```
+
+Separate the resampled CAMS data into sub-datasets(8*2=16) to have the same dimension as TROPOMI (3-hour to daily)
+
+```{R eval = FALSE}
+subset.CAMS_hour <- CAMS_rsNN %>% 
+  st_get_dimension_values(3) %>% 
+  hour() %>% 
+  unique()
+# 2 attributes: "tcno2" "tc_no"
+subset.CAMS_var <- CAMS_rsNN %>% names()
+# subset into 16 3D arrays
+for(h in subset.CAMS_hour){
+  for(v in subset.CAMS_var){
+    # subset the raw dataset: at hour h and for variable (attribute) v
+    CAMS_rs_temp <- CAMS_rsNN %>% 
+      filter(hour(time) == h) %>% 
+      select(all_of(v)) %>% # Note: Using an external vector in selections is ambiguous. Use `all_of(v)` instead of `v` to silence this message.
+      setNames(v) %>% 
+      # dimension: date
+      st_set_dimensions(3 , 
+                        values = as_date(st_get_dimension_values(. , 3)) , 
+                        names = "date")
+    # name the object name as CAMS_rs_{Variable}_{Hour}
+    assign(paste0("CAMS_rs_" , v , "_" , h) , CAMS_rs_temp)
+    rm(CAMS_rs_temp)
+  }
+}
+# clean intermediate objects of the loop
+rm(h , v , subset.CAMS_hour , subset.CAMS_var)
+```
+
+Output: `CAMS_rs_{Variable}_{Hour}` with  
+
+* `{Variable}`: `tc_no`, `tcno2`  
+* `{Hour}`: `0`, `3`, `6`, `9`, `12`, `15`, `18`, `21` ; 
+
+and each of these as a 3D array. Here's an example comaring the original and resampled CAMS data on a random date: 
+
+```{R echo = FALSE , fig.height = 3 , fig.width = 9}
+cowplot::plot_grid(
+  # plot: CAMS with original grids
+  ggplot() +
+    # first image
+    geom_stars(data = CAMS_raw[1,,,977]) +
+    # reference grid cells
+    geom_sf(data = CAMS_raw[,,,1] %>% 
+              # convert the grids to polygon to visualize the grid cells
+              st_as_sf(as_points = FALSE) , 
+            color = "azure3" , fill = NA , size = 0.1) +
+    # Switzerland
+    geom_sf(data = CH , fill = NA , color = "white") +
+    scale_fill_viridis_c() +
+    # crop graph canvas to AOI
+    coord_sf(xlim = st_bbox(AOI)[c("xmin" , "xmax")] , 
+             ylim = st_bbox(AOI)[c("ymin" , "ymax")]) +
+    labs(x = "Longtitude" , y = "Latitude" , fill = "NO2" , 
+         title = "Original CAMS" , 
+         subtitle = "Data: CAMS total column NO2 on 2019-05-03 00H") , 
+  # plot: CAMS resampled to TROPOMI grids
+  ggplot() +
+    # first image
+    geom_stars(data = CAMS_rs_tcno2_0[,,,123]) +
+    # reference grid cells
+    geom_sf(data = CAMS_rsNN[,,,1] %>% 
+              # convert the grids to polygon to visualize the grid cells
+              st_as_sf(as_points = FALSE) , 
+            color = "azure3" , fill = NA , size = 0.1) +
+    # Switzerland
+    geom_sf(data = CH , fill = NA , color = "white") +
+    scale_fill_viridis_c() +
+    # crop graph canvas to AOI
+    coord_sf(xlim = st_bbox(AOI)[c("xmin" , "xmax")] , 
+             ylim = st_bbox(AOI)[c("ymin" , "ymax")]) +
+    labs(x = "Longtitude" , y = "Latitude" , fill = "NO2" , 
+         title = "Resampled-CAMS to TROPOMI grids" , 
+         subtitle = "Data: CAMS total column NO2 on 2019-05-03 00H") 
+)
+```
+
+### Elevation
+
+Bilinear interpolation
+
+```{R eval = FALSE}
+# upscaling for continuous data
+# bilinear interpolation
+DEM_rs <- DEM_raw %>% 
+  st_warp(TROPOMI_raw[,,,1] %>% split("date") , 
+          use_gdal = TRUE , 
+          method = "bilinear") %>% 
+  setNames("DEM")
+```
+
+### ERA5 meteorological variables
+
+Nearest-neighbor resampling
+
+```{R eval = FALSE}
+ERA_rsNN <- ERA_raw %>% 
+  st_warp(dest = TROPOMI_raw) 
+```
+
+Separate the resampled ERAA5 data into sub-datasets(8*2=16) to have the same dimension as OMI (3-hour to daily)
+
+```{R eval = FALSE}
+subset.ERA_hour <- ERA_rsNN %>% 
+  st_get_dimension_values(3) %>% 
+  hour() %>% 
+  unique()
+# 7 attributes: "u10" "v10" "t2m" "blh" "sp"  "tcc" "tp" 
+subset.ERA_var <- ERA_rsNN %>% names()
+# subset into 16 3D arrays
+for(h in subset.ERA_hour){
+  for(v in subset.ERA_var){
+    # subset the raw dataset: at hour h and for variable (attribute) v
+    ERA_rs_temp <- ERA_rsNN %>% 
+      filter(hour(time) == h) %>% 
+      select(all_of(v)) %>% 
+      setNames(v) %>% 
+      # # dimension: date
+      st_set_dimensions(3 , 
+                        values = as_date(st_get_dimension_values(. , 3)) , 
+                        names = "date")
+    # name the object name as CAMS_rs_{Variable}_{Hour}
+    assign(paste0("ERA_rs_" , v , "_" , h) , ERA_rs_temp)
+    rm(ERA_rs_temp)
+  }
+}
+# clean intermediate objects of the loop
+rm(h , v , subset.ERA_hour , subset.ERA_var)
+```
+
+Output: `ERA_rs_{Variable}_{Hour}` with  
+
+* `{Variable}`: `u10`, `v10`, `t2m`, `blh`, `sp`, `tcc`, `tp`  
+* `{Hour}`: `0`, `3`, `6`, `9`, `12`, `15`, `18`, `21` ; 
+
+and each of these as a 3D array.
+
+#### Convert u,v wind components to wind speed, wind direction
+
+Conversion formula:   
+
+* $wd = atan2(-u , -v)$  
+* $ws = \sqrt{u^2 + v^2}$
+
+```{R eval = FALSE}
+subset.ERA_hour <- ERA_raw %>% 
+  st_get_dimension_values(3) %>% 
+  hour() %>% 
+  unique()
+for(h in subset.ERA_hour){
+  ERA_rs_wind_temp <- c(
+    get(paste0("ERA_rs_u10_" , h)) , 
+    get(paste0("ERA_rs_v10_" , h))
+  ) %>% 
+    # wd = atan2(-u10,-v10)
+    # ws = sqrt(u10^2 + v10^2)
+    transmute(wd = atan2(-u10 , -v10) , 
+              ws = sqrt(u10^2+v10^2))
+  # name the object name as CAMS_rs_wind_{Hour}
+  assign(paste0("ERA_rs_wind_" , h) , ERA_rs_wind_temp)
+}
+# clean
+rm(h , subset.ERA_hour , ERA_rs_wind_temp)
+```
+
+## Cleaned input dataset for the model
+
+```{R eval = FALSE}
+# spatialtemporal datasets: 3D (x,y,date) + attributes --------------------------------
+spatialtemporal <- c(
+  # TROPOMI 
+  TROPOMI_raw %>% 
+    setNames("TROPOMI_NO2") , 
+  # CAMS NO2
+  c(CAMS_rs_tcno2_0 , CAMS_rs_tcno2_3 , CAMS_rs_tcno2_6 , CAMS_rs_tcno2_9 , 
+    CAMS_rs_tcno2_12 , CAMS_rs_tcno2_15 , CAMS_rs_tcno2_18 , CAMS_rs_tcno2_21) %>% 
+    setNames(c("CAMS_NO2_00" , "CAMS_NO2_03" , "CAMS_NO2_06" , "CAMS_NO2_09" , 
+               "CAMS_NO2_12" , "CAMS_NO2_15" , "CAMS_NO2_18" , "CAMS_NO2_21")) , 
+  # CAMS NO
+  c(CAMS_rs_tc_no_0 , CAMS_rs_tc_no_3 , CAMS_rs_tc_no_6 , CAMS_rs_tc_no_9 , 
+    CAMS_rs_tc_no_12 , CAMS_rs_tc_no_15 , CAMS_rs_tc_no_18 , CAMS_rs_tc_no_21) %>% 
+    setNames(c("CAMS_NO_00" , "CAMS_NO_03" , "CAMS_NO_06" , "CAMS_NO_09" , 
+               "CAMS_NO_12" , "CAMS_NO_15" , "CAMS_NO_18" , "CAMS_NO_21")) , 
+  # ERA blh
+  c(ERA_rs_blh_0 , ERA_rs_blh_3 , ERA_rs_blh_6 , ERA_rs_blh_9 ,
+    ERA_rs_blh_12 , ERA_rs_blh_15 , ERA_rs_blh_18 , ERA_rs_blh_21) %>%
+    setNames(c("blh_00" , "blh_03" , "blh_06" , "blh_09" ,
+               "blh_12" , "blh_15" , "blh_18" , "blh_21")) , 
+  # ERA temperature
+  c(ERA_rs_t2m_0 , ERA_rs_t2m_3 , ERA_rs_t2m_6 , ERA_rs_t2m_9 , 
+    ERA_rs_t2m_12 , ERA_rs_t2m_15 , ERA_rs_t2m_18 , ERA_rs_t2m_21) %>% 
+    setNames(c("t2m_00" , "t2m_03" , "t2m_06" , "t2m_09" , 
+               "t2m_12" , "t2m_15" , "t2m_18" , "t2m_21")) , 
+  # ERA surface pressure
+  c(ERA_rs_sp_0 , ERA_rs_sp_3 , ERA_rs_sp_6 , ERA_rs_sp_9 , 
+    ERA_rs_sp_12 , ERA_rs_sp_15 , ERA_rs_sp_18 , ERA_rs_sp_21) %>% 
+    setNames(c("sp_00" , "sp_03" , "sp_06" , "sp_09" , 
+               "sp_12" , "sp_15" , "sp_18" , "sp_21")) , 
+  # ERA total cloud cover
+  c(ERA_rs_tcc_0 , ERA_rs_tcc_3 , ERA_rs_tcc_6 , ERA_rs_tcc_9 , 
+    ERA_rs_tcc_12 , ERA_rs_tcc_15 , ERA_rs_tcc_18 , ERA_rs_tcc_21) %>% 
+    setNames(c("tcc_00" , "tcc_03" , "tcc_06" , "tcc_09" , 
+               "tcc_12" , "tcc_15" , "tcc_18" , "tcc_21")) ,
+  # ERA total precipitation
+  c(ERA_rs_tp_0 , ERA_rs_tp_3 , ERA_rs_tp_6 , ERA_rs_tp_9 , 
+    ERA_rs_tp_12 , ERA_rs_tp_15 , ERA_rs_tp_18 , ERA_rs_tp_21) %>% 
+    setNames(c("tp_00" , "tp_03" , "tp_06" , "tp_09" , 
+               "tp_12" , "tp_15" , "tp_18" , "tp_21")) , 
+  # ERA wind
+  c(ERA_rs_wind_0 , ERA_rs_wind_3 , ERA_rs_wind_6 , ERA_rs_wind_9 , 
+    ERA_rs_wind_12 , ERA_rs_wind_15 , ERA_rs_wind_18 , ERA_rs_wind_21) %>% 
+    setNames(c("wd_00", "ws_00", "wd_03", "ws_03", "wd_06", "ws_06", "wd_09", "ws_09",
+               "wd_12", "ws_12", "wd_15", "ws_15", "wd_18", "ws_18", "wd_21", "ws_21"))
+) %>% 
+  st_set_dimensions(3 , values = yday(st_get_dimension_values(. , 3)) , names = "DOY")
+
+# spatial datasets: 2D (x,y) + attributes --------------------------------
+spatial <- c(
+  # DEM
+  DEM_rs
+)
+```
+
+After reshaping the data, `spatialtemporal` is a 3D array (x,y,day) and `spatial` is a 2D array (x,y). Both matches the resolution of `TROPOMI`.   
+ 
+Covert the `spatialtemporal` and `spatial` arrays to data.frame for the model:  
+
+```{R eval = FALSE}
+imputation_df <- spatialtemporal %>% 
+  as.data.frame() %>% 
+  mutate(across(everything() , as.numeric)) %>% 
+  left_join(spatial %>% as.data.frame() , 
+            by = c("x" , "y")) %>% 
+  # Some pixels are outside of the AOI and are always NA, 
+  # should be removed from the data.frame so that it wouldn’t be counted.
+  full_join(
+    # AOI mask in raster form
+    AOI %>% 
+      st_rasterize(template = spatial) %>% 
+      # is.AOI: a column with TRUE/FALSE 
+      mutate(is.AOI = ifelse(is.na(FID) , FALSE , TRUE)) %>% 
+      as.data.frame(), 
+    by = c("x" , "y")
+  ) %>% 
+  # remove the pixels that are outside AOI (is.AOI=FALSE)
+  filter(is.AOI) %>% 
+  # remove the FID and is.AOI columns from the AOI mask
+  select(-FID , -is.AOI)
+```
+
+## Spatially-blocked 10-fold cross validation
+
+The area of interest is divided into large grids and randomly assigned with IDs (1-10) to apply a spatially-blocked cross validation. 
+
+```{R eval = FALSE}
+# spatially blocked k-fold cross validation
+k_fold <- 10
+
+# spatially-blocked by grids across AOI
+set.seed(2201)
+# make grids and assign cross validation index
+spatialGrid_CV <- AOI %>% 
+  # reporject to OMI
+  st_transform(st_crs(spatial)) %>% 
+  # make grids
+  st_make_grid(n = c(10,4)) %>% 
+  st_as_sf() %>% 
+  # randomly assign cross validation index
+  mutate(spatial_CV = sample(1:k_fold , nrow(.) , replace = TRUE))
+# rasterize the grids with CV-index to stars
+spatialGrid_CV_stars <- st_rasterize(spatialGrid_CV["spatial_CV"], template = spatial) %>% 
+  mutate(spatial_CV = as.factor(spatial_CV))
+```
+
+```{R fig.height = 3}
+ggplot() +
+  # spatial-CV
+  geom_stars(data = spatialGrid_CV_stars) +
+  # OMI grids
+  geom_sf(data = spatial %>% 
+            # convert the grids to polygon to visualize the grid cells
+            st_as_sf(as_points = FALSE) ,  
+          color = "azure1" , fill = NA , alpha = 0.5 , size = 0.2) +
+  # Switzerland
+  geom_sf(data = CH , fill = NA , color = "white") +
+  # AOI
+  geom_sf(data = AOI , fill = NA , color = "azure2") +
+  scale_fill_npg() +
+  coord_sf(expand = FALSE) +
+  labs(x = "Longtitude" , y = "Latitude" , fill = "k-fold \ncross \nvalidation \ngroup")
+```
+
+### Include the spatial CV design into the input data
+
+```{R eval = FALSE}
+imputation_df <- spatialGrid_CV_stars %>% 
+  setNames("spatial_CV") %>% 
+  as.data.frame() %>% 
+  # join to the input data
+  right_join(imputation_df , by = c("x" , "y")) 
+```
+
+Take a look at the full data `imputation_df`: 
+
+```{R}
+str(imputation_df)
+```
+
+***
+
+# Model development
+
+Random forest is used to model the relationship between $TROPOMI-NO_2$ and the covariates. The first step is to optimize the predictor variable set that is included in the model. 
+
+## Grid-search: optimized predictor variable set by hour and variables
+
+For the CAMS-Global-Reanalysis data and the ERA5 data, we included the data for the whole day with 3-hour interval at the first place (0H, 3H, 6H, 9H, 12H, 15H, 18H, 21H) and let the model decide which one to use, based on model performance indices like $R^2$.  We used a grid search to try the models with data of different timesteps and compare the OOB- and CV-$R^2$. Additionally, we looked at different combination (subsets) of the predictor variables. (Preliminary tryings, which include purely-random values in the predictor variables, suggest that total precipitation `tp` is as useless as random values to the response variable by looking at the variable importance output of the random forest model.) The three predictor variable combination sets are  
+
+* `base`: CAMS-NO2, CAMS-NO, DOY, altitude, x, y  
+* `base_meteo6`: `base` + temp, blh, tcc, sp, ws, wd
+* `base_meteo7`: `base` + temp, blh, tcc, sp, ws, wd, tp
+
+```{R eval = FALSE}
+# all combinations
+search_hour <- c("00" , "03" , "06" , "09" , "12" , "15" , "18" , "21")
+search_var <- list(
+  # base model
+  base = c("x" , "y" , "DOY" , "DEM" , "CAMS_NO2_" , "CAMS_NO_") , 
+  # base + temperature, blh, tcc, sp, wd, ws
+  base_meteo6 = c("x" , "y" , "DOY" , "DEM" , "CAMS_NO2_" , "CAMS_NO_" , "t2m_" , "blh_" , "tcc_" , "sp_" , "wd_" , "ws_") ,
+  # base + all meteorological variables
+  base_meteo7 = c("x" , "y" , "DOY" , "DEM" , "CAMS_NO2_" , "CAMS_NO_" , "t2m_" , "blh_" , "tcc_" , "sp_" , "wd_" , "ws_" , "tp_")
+)
+# grid search over every combination
+N.trees <- 500
+gridSearch_hour_var <- list()
+gridSearch_pb <- txtProgressBar(min = 0, max = length(search_hour) * length(search_var) , style = 3)
+for(h in 1:length(search_hour)){
+  for(v in 1:length(search_var)){
+    # progress bar
+    setTxtProgressBar(gridSearch_pb , length(search_var) * (h-1) + v)
+    result_list_hv <- list()
+    # subset dataset for the predictor variable combination
+    modelInput_df.cv <- imputation_df %>%
+      # exclude rows with missing predictor/response value
+      filter(!if_any(everything() , is.na)) %>%
+      # only the hour in search_hour
+      select(x , y , TROPOMI_NO2 , DOY , DEM , ends_with(search_hour[h]) , spatial_CV) %>%
+      # only the variables in search_var
+      select(TROPOMI_NO2 ,contains(search_var[[v]]) , spatial_CV)
+    # model with full training data
+    rf_temp <- ranger(TROPOMI_NO2 ~ . ,
+                      data = modelInput_df.cv %>% select(-spatial_CV) ,
+                      importance = "impurity" ,
+                      keep.inbag = TRUE , 
+                      num.trees = N.trees)
+    # store OOB-R2 of the model
+    result_list_hv$OOB_R2 <- rf_temp$r.squared
+    # store variable importance of the model
+    result_list_hv$varImportance <- sort(rf_temp$variable.importance , decreasing = TRUE)
+    # cross-validation model
+    result_list_hv$CV_R2_k <- c()
+    for(k in 1:k_fold){
+      rf_temp_cv <- ranger(TROPOMI_NO2 ~ . ,
+                           data = modelInput_df.cv %>% 
+                             filter(spatial_CV != as.character(k)) %>% 
+                             select(-spatial_CV) ,
+                           importance = "impurity" ,
+                           keep.inbag = TRUE , num.trees = N.trees)
+      rf_temp_cv_pred <- predict(rf_temp_cv , 
+                                 data = modelInput_df.cv %>% 
+                                   filter(spatial_CV == as.character(k)) %>% 
+                                   select(-spatial_CV))
+      rf_temp_cv_obs_pred <- modelInput_df.cv %>% 
+        filter(spatial_CV == as.character(k)) %>% 
+        select(TROPOMI_NO2) %>% 
+        rename(obs = TROPOMI_NO2) %>% 
+        mutate(pred = rf_temp_cv_pred$predictions)
+      result_list_hv$CV_R2_k[k] <- cor(rf_temp_cv_obs_pred$obs , rf_temp_cv_obs_pred$pred)^2
+    }
+    result_list_hv$CV_R2 <- mean(result_list_hv$CV_R2_k)
+    # store results
+    if(v == 1) gridSearch_hour_var[[h]] <- list()
+    gridSearch_hour_var[[h]][[v]] <- result_list_hv
+    rm(rf_temp , rf_temp_cv)
+  }
+  # set names in the list
+  names(gridSearch_hour_var[[h]]) <- names(search_var)
+}
+rm(h,v,k)
+names(gridSearch_hour_var) <- paste0("HOUR_" , search_hour)
+```
+
+### Result
+
+```{R eval = FALSE}
+gridSearch_OOB_R2 <- gridSearch_hour_var %>% 
+  unlist() %>% 
+  as.data.frame() %>% 
+  rename(.data = . , value = `.`) %>% 
+  mutate(var = rownames(.)) %>% 
+  filter(grepl("OOB_R2$" , var)) %>% 
+  rename(OOB_R2 = value) %>% 
+  separate(col = var , into = c("Hour" , "model" , "var") , sep = "\\.") %>% 
+  select(-var) %>% 
+  mutate(Hour = gsub("HOUR_" , "" , Hour)) %>% 
+  as_tibble()
+gridSearch_CV_R2 <- gridSearch_hour_var %>% 
+  unlist() %>% 
+  as.data.frame() %>% 
+  rename(.data = . , value = `.`) %>% 
+  mutate(var = rownames(.)) %>% 
+  filter(grepl("CV_R2$" , var)) %>% 
+  rename(CV_R2 = value) %>% 
+  separate(col = var , into = c("Hour" , "model" , "var") , sep = "\\.") %>% 
+  select(-var) %>% 
+  mutate(Hour = gsub("HOUR_" , "" , Hour)) %>% 
+  as_tibble()
+```
+
+```{R fig.height = 3 , fig.width = 10}
+cowplot::plot_grid(
+  # visualization: OOB-R2
+  gridSearch_OOB_R2 %>% 
+    ggplot(aes(x = Hour , y = model , fill = OOB_R2)) + 
+    geom_raster() +
+    geom_text(aes(label = round(OOB_R2 , 3)) , color = "white") +
+    coord_cartesian(expand = FALSE) +
+    scale_fill_gradientn(colours = RColorBrewer::brewer.pal(5 , "YlGnBu")) +
+    labs(x = "Hour (CAMS and ERA5)" , y = "Predictor variable set" , 
+         fill = expression("OOB-R"^2)) , 
+  # visualization: CV-R2
+  gridSearch_CV_R2 %>% 
+    ggplot(aes(x = Hour , y = model , fill = CV_R2)) + 
+    geom_raster() +
+    geom_text(aes(label = round(CV_R2 , 3)) , color = "white") +
+    coord_cartesian(expand = FALSE) +
+    scale_fill_gradientn(colours = RColorBrewer::brewer.pal(7 , "BuGn")) +
+    labs(x = "Hour (CAMS and ERA5)" , y = "Predictor variable set" , 
+         fill = expression("CV-R"^2)) , 
+  ncol = 2
+)
+```
+
+From the result of the grid search over the hours, we can first observe that the models using CAMS- and ERA5-variables at **12H** have the higher $R^2$. Therefore in the next step we further look at different combination of predictor variables at 12H. Furthermorem, the models including meteorological variables return higher OOB- and CV-$R^2$ compared to `base`. This is different from the observation from the OMI models. But to be consistent with the OMI model, we also compare `base` model with the other models with more predictor variables in the next step. 
+
+## Grid-search: hour fixed, different subsets of variables
+
+Here we first include all the predictor variables (12H for CAMS and ERA5) in a model (full model), and record the order of variable importance reported by the model. Then a grid search is applied where the *i* least important variables are removed at a time. Additionally, like mentioned above, the `base` model which does not consider any meteorological variables is also compared. 
+
+```{R eval = FALSE}
+modelInput_df <- imputation_df %>%
+  select(x , y , DOY , TROPOMI_NO2 , DEM , ends_with("_12") , spatial_CV) %>%
+  # exclude rows with missing predictor/response value
+  filter(!if_any(everything() , is.na)) 
+
+# grid search: exclude i least important variables at a time
+# initial: all predictor variables
+rf_initial <- ranger(TROPOMI_NO2 ~ x + y + DOY + DEM + CAMS_NO2_12 + CAMS_NO_12 + 
+                       blh_12 + t2m_12 + sp_12 + tcc_12 + tp_12 + ws_12 + wd_12  , 
+                     data = modelInput_df ,
+                     importance = "impurity" ,
+                     keep.inbag = TRUE , 
+                     num.trees = N.trees)
+inputVar_ordered <- rf_initial$variable.importance %>% 
+  sort(decreasing = TRUE) %>% 
+  names()
+rm(rf_initial)
+# grid search 
+gridSearch_12H <- list()
+gridSearch_i <- 1:7
+N.trees <- 200
+for(i in gridSearch_i){
+  gridSearch_12H[[i]] <- list()
+  # exclude i-1 least importance variables (starting from initial aka excluding no variable)
+  formula_rf.temp <- sprintf("TROPOMI_NO2 ~ %s" , 
+                             paste(inputVar_ordered[1:(length(inputVar_ordered)-i+1)] , collapse = '+')) %>% 
+    formula() # making the formula object
+  # also try: no ERA-5 at all
+  if(i == max(gridSearch_i)) formula_rf.temp = TROPOMI_NO2 ~ x + y + DOY + DEM + CAMS_NO2_12 + CAMS_NO_12
+  gridSearch_12H[[i]]$formula <- formula_rf.temp
+  # train model
+  rf_temp <- ranger(formula_rf.temp , 
+                    data = modelInput_df ,
+                    importance = "impurity" ,
+                    keep.inbag = TRUE , 
+                    num.trees = N.trees)
+  # store OOB-R2 result
+  gridSearch_12H[[i]]$OOB_R2 <- rf_temp$r.squared
+  # store importance
+  gridSearch_12H[[i]]$varImportance <- rf_temp$variable.importance
+  # cross validation
+  gridSearch_12H[[i]]$CV_R2_k <- c()
+  gridSearch_12H[[i]]$CV_slope_k <- c()
+  gridSearch_12H[[i]]$CV_RMSE_k <- c()
+  for(k in 1:k_fold){
+    # model
+    rf_temp_cv <- ranger(formula_rf.temp ,
+                         data = modelInput_df %>% 
+                           filter(spatial_CV != as.character(k)) ,
+                         importance = "impurity" ,
+                         keep.inbag = TRUE)
+    # prediction on test set
+    rf_temp_cv_pred <- predict(rf_temp_cv , 
+                               data = modelInput_df %>% 
+                                 filter(spatial_CV == as.character(k)) )
+    rf_temp_cv_obs_pred <- modelInput_df %>% 
+      filter(spatial_CV == as.character(k)) %>% 
+      select(TROPOMI_NO2) %>% 
+      rename(obs = TROPOMI_NO2) %>% 
+      mutate(pred = rf_temp_cv_pred$predictions)
+    # calculate CV-R2
+    gridSearch_12H[[i]]$CV_R2_k[k] <- cor(rf_temp_cv_obs_pred$obs , rf_temp_cv_obs_pred$pred)^2
+    # calculate CV-slope
+    gridSearch_12H[[i]]$CV_slope_k[k] <- lm(obs ~ pred , data = rf_temp_cv_obs_pred)$coefficients[2]
+    # calculate CV-RMSE
+    gridSearch_12H[[i]]$CV_RMSE_k[k] <- rf_temp_cv_obs_pred %>% 
+      summarize(RMSE = sqrt(sum(((pred-obs)^2)/n())) ) %>% 
+      unlist
+    # clean
+    rm(rf_temp_cv , rf_temp_cv_pred , rf_temp_cv_obs_pred)
+  }
+  # result: mean CV-R2, mean slope, mean RMSE
+  gridSearch_12H[[i]]$CV_R2 <- mean(gridSearch_12H[[i]]$CV_R2_k)
+  gridSearch_12H[[i]]$CV_slope <- mean(gridSearch_12H[[i]]$CV_slope_k)
+  gridSearch_12H[[i]]$CV_RMSE <- mean(gridSearch_12H[[i]]$CV_RMSE_k)
+  # clean
+  rm(formula_rf.temp , rf_temp)
+}
+rm(i,k)
+names(gridSearch_12H) <- paste0("subset" , gridSearch_i -1)
+```
+
+### Result
+
+```{R fig.height = 4 , fig.width = 8}
+cowplot::plot_grid(
+  # visaulization of grid search result: OOB- and CV-R2
+  data.frame(
+    subset = gridSearch_i-1 , 
+    OOB_R2 = sapply(gridSearch_12H , function(mylist)mylist$OOB_R2 ) , 
+    CV_R2 = sapply(gridSearch_12H , function(mylist)mylist$CV_R2 )
+  ) %>% 
+    pivot_longer(cols = c(OOB_R2 , CV_R2) , names_to = "var") %>% 
+    ggplot(aes(x = subset , y = value , color = var) ) +
+    geom_point() +
+    geom_line() +
+    scale_color_discrete(labels = c(CV_R2 = "Spatially-blocked cross validation" , OOB_R2 = "Out-of-bag")) +
+    labs(x = "# variables excluded" , y = expression("R"^2) , 
+         color = "Test set") +
+    theme_bw() +
+    theme(legend.position = "right") , 
+  # visaulization of grid search result: CV-RMSE
+  data.frame(
+    subset = gridSearch_i-1 , 
+    CV_RMSE = sapply(gridSearch_12H , function(mylist)mylist$CV_RMSE )
+  ) %>% 
+    ggplot(aes(x = subset , y = CV_RMSE)) +
+    geom_point() +
+    geom_line() +
+    labs(x = "# variables excluded" , y = "CV-RMSE") +
+    theme_bw() , 
+  align = "v" , axis = "lr" , ncol = 1 , rel_heights = c(6,4)
+)
+```
+
+The models on the x axis are respectively:  
+
+* the full model  
+* full model - `tp`  
+* full model - `tcc` - `tp`  
+* full model - `wd` - `tcc` - `tp`  
+* full model - `ws` - `wd` - `tcc` - `tp`   
+* full model - `blh` - `ws` - `wd` - `tcc` - `tp` 
+* only base model (CAMS-NO2, CAMS-NO, DOY, altitude, x, y)  
+
+We can see that the model (full model - `tp`) has the OOB- and CV-$R^2$ and CV-RMSE that is comparable with the full model. The variable `tp` (total precipitation) is likely to be useless to model `TROPOMI_NO2`. On the other hand, including the other predictor variables seems to indeed improve the performance of the model. Consequently, we chose "full model - `tp`" as the final model. 
+
+## Final model
+
+The final model is $TROPOMI_{ij} \sim altitude_{i} + sp_{ij} + CAMS_{12}(NO_2)_{ij} + CAMS_{12}(NO)_{ij} + y_i + x_i + DOY{j} + temp_{ij} + blh_{ij} + ws_{ij} + wd_{ij} + tcc_{ij}$, which uses the predictor variables:  
+
+* altitude at grid i  
+* ERA-5 surface pressure at grid i on day j at 12:00UTC  
+* CAMS total column NO2 at grid i on day j at 12:00UTC  
+* CAMS total column NO at grid i on day j at 12:00UTC  
+* centroid geographic coordinates of grid i  
+* day of year (1-365) on day j  
+* ERA-5 2m temperature at grid i on day j at 12:00UTC  
+* ERA-5 boundary layer height at grid i on day j at 12:00UTC  
+* ERA-5 wind speed and wind direction at grid i on day j at 12:00UTC  
+* ERA-5 total cloud cover at grid i on day j at 12:00UTC
+
+```{R eval = FALSE}
+formula_rf_final <- TROPOMI_NO2 ~ DEM + sp_12 + CAMS_NO_12 + CAMS_NO2_12 + y + x + DOY + t2m_12 + blh_12 + ws_12 + wd_12 + tcc_12
+```
+
+And the hyperparameters of the random forest model are chosen to be: `num.trees=500` and `mtry=5` after grid search over possible candidate value combinations. (The tedious process was not demonstrated here.)
+
+```{R eval = FALSE}
+modelInput_df <- imputation_df %>%
+  select(x , y , DOY , TROPOMI_NO2 , DEM , ends_with("_12") , spatial_CV) %>%
+  # exclude rows with missing predictor/response value
+  filter(!if_any(everything() , is.na)) 
+rf_final <- ranger(formula_rf_final , 
+                   data = modelInput_df , 
+                   num.trees = 500 , 
+                   mtry = 5 , 
+                   importance = "impurity" ,
+                   keep.inbag = TRUE)
+```
+
+```{R}
+rf_final
+```
+
+
+## Evaluation of the final model
+
+### OOB-$R^2$
+
+```{R}
+rf_final$r.squared
+```
+
+### goodness-of-fit (slope, intercept)
+
+```{R eval = FALSE}
+rf_final_pred <- rf_final$predictions #OOB-predictions
+rf_final_obs_pred <- modelInput_df %>% 
+  select(x,y,DOY,TROPOMI_NO2) %>% 
+  rename(obs = TROPOMI_NO2) %>% 
+  mutate(pred = rf_final_pred ) 
+```
+
+```{R}
+summary(lm(obs ~ pred , data = rf_final_obs_pred))
+```
+
+* slope = 1.03±0.0008  
+* intercept = -6.716e+13 ± 2.470e+12
+
+```{R fig.height = 4}
+rf_final_obs_pred %>% 
+  ggplot(aes(x = pred , y = obs)) +
+  geom_abline(slope = 1 , intercept = 0 , linetype = 2 , color = "azure4") +
+  geom_point(shape = 1 , alpha = 0.5) +
+  geom_smooth(method = "lm") +
+  coord_fixed(1) +
+  labs(x = expression("Modeled TROPOMI-NO"[2]) , y = expression("Observed TROPOMI-NO"[2])) +
+  theme_bw()
+```
+
+
+### cross validation $R^2$
+```{R eval = FALSE}
+rf_final_CV_R2_k <- c()
+for(k in 1:k_fold){
+  # model
+  rf_temp_cv <- ranger(formula_rf_final ,
+                       data = modelInput_df %>% 
+                         filter(spatial_CV != as.character(k)) ,
+                       importance = "impurity" ,
+                       keep.inbag = TRUE , 
+                       num.trees = rf_final$num.trees , 
+                       mtry = rf_final$mtry)
+  # prediction on test set
+  rf_temp_cv_pred <- predict(rf_temp_cv , 
+                             data = modelInput_df %>% 
+                               filter(spatial_CV == as.character(k)) )
+  rf_temp_cv_obs_pred <- modelInput_df %>% 
+    filter(spatial_CV == as.character(k)) %>% 
+    select(TROPOMI_NO2) %>% 
+    rename(obs = TROPOMI_NO2) %>% 
+    mutate(pred = rf_temp_cv_pred$predictions)
+  # calculate CV-R2
+  rf_final_CV_R2_k[k] <- cor(rf_temp_cv_obs_pred$obs , rf_temp_cv_obs_pred$pred)^2
+  # clean
+  rm(rf_temp_cv , rf_temp_cv_pred , rf_temp_cv_obs_pred)
+}
+```
+
+```{R}
+# mean CV-R2
+mean(rf_final_CV_R2_k)
+```
+
+```{R}
+range(rf_final_CV_R2_k)
+```
+
+10-fold-CV-$R^2$: 0.735 (0.613—0.856)
+
+*** 
+
+# Implementation 
+
+Use the full datasets (all pixel-days) and predict `OMI_NO2` with the final model: 
+
+```{R eval = FALSE}
+projected_rf <- predict(rf_final , 
+                        data = imputation_df %>% 
+                          filter(!is.na(DEM)) , 
+                        type = "se")
+```
+
+Prepare the projected data as data frame (along with the predictor variables): 
+
+```{R eval = FALSE}
+projected <- imputation_df %>% 
+  filter(!if_any(c(DEM,sp_12,t2m_12,blh_12,ws_12,wd_12,tcc_12) , is.na)) %>% 
+  select(x,y,DOY,TROPOMI_NO2) %>% 
+  # add the projected (model-predicted) OMI-NO2
+  mutate(TROPOMI_NO2_pred = projected_rf$predictions , 
+         TROPOMI_NO2_pred_se = projected_rf$se) %>% 
+  # set negative values to 0
+  mutate(TROPOMI_NO2_pred = ifelse(TROPOMI_NO2_pred < 0 , 0 , TROPOMI_NO2_pred))
+```
+
+Convert the data frame to spatialtemporal array: 
+
+```{R eval = FALSE}
+projected_stars <- projected %>% 
+  # convert DOY to date
+  mutate(DOY = as_date(DOY , origin = "2018-12-31")) %>% 
+  # convert to stars
+  st_as_stars(dims = c("x" , "y" , "DOY")) %>% 
+  # rename dimension DOY to date
+  st_set_dimensions(3 , names = "date") %>% 
+  # set coordinate system
+  st_set_crs(st_crs(TROPOMI_raw)) %>% 
+  # de-select the attribute "DOY"
+  select(-DOY) %>% 
+  # imputed: observed + predicted
+  mutate(TROPOMI_NO2_imputed = ifelse(is.na(TROPOMI_NO2) , TROPOMI_NO2_pred , TROPOMI_NO2))
+```
+
+Here we can look at the final projection result: 
+
+```{R}
+projected_stars
+```
+
+`projected_stars` is a 3D array (x,y,date) with 4 attributes. `OMI_NO2` is the raw OMI pixels, `TROPOMI_NO2_pred` is the model-predicted values, `TROPOMI_NO2_pred_se` is the prediction standard error reported by `ranger` (the random forest model), and `TROPOMI_NO2_imputed` is the final imputed product. Pixels that exist in the original TROPOMI observation stay the same in `TROPOMI_NO2_imputed`, whereas missing pixels are filled in with the model-predicted values (`TROPOMI_NO2_pred`).   
+
+We can visualize the projection result (of some random dates): 
+
+```{R fig.width = 10 , wig.height = 6}
+selected_dates <- interval("2019-02-01" , "2019-02-10")
+ggplot() +
+  geom_stars(
+    data = projected_stars %>% 
+      filter(date %within% selected_dates) %>% 
+      merge() %>% 
+      st_set_dimensions(4 , values = c("observed" , "predicted" , "se" , "imputed")) 
+  ) +
+  geom_sf(data = CH , fill = NA , color = "white") +
+  scale_fill_viridis_c(limits = c(0,1e16) , oob = scales::squish) +
+  coord_sf(expand = FALSE) +
+  facet_grid(attributes~date) +
+  labs(x = "Longtitude" , y = "Latitude" , fill = "TropColumnNO2") +
+  theme(axis.text = element_text(size = 6))
+```
+
+As an alternative for the visualization, an animation is used:  
+
+```{R eval = FALSE}
+library(gganimate)
+annimation_obs_pred <- ggplot() +
+  geom_stars(
+    data = projected_stars %>%
+      select(TROPOMI_NO2 , TROPOMI_NO2_pred , TROPOMI_NO2_imputed) %>%
+      merge() %>%
+      st_set_dimensions(4 , values = c("observed" , "predicted" , "imputed"))
+  ) +
+  geom_sf(data = CH , fill = NA , color = "white") +
+  scale_fill_viridis_c(limits = c(0,1e16) , oob = scales::squish) +
+  coord_sf(expand = FALSE) +
+  facet_grid(~attributes) +
+  transition_time(date) +
+  labs(x = "Longtitude" , y = "Latitude" , fill = "TropColumnNO2" ,
+       title = "Date: {frame_time}") +
+  theme(axis.text = element_text(size = 6))
+animate(annimation_obs_pred , duration = 365 , fps = 1)
+```
+
+![](obs_pred_imputed.gif) 
+
+Note that some pixels are "not visualized" due to the limits setting of the color symbology, not missing! 
+
+Export the projection result: 
+
+```{R eval = FALSE}
+if(!dir.exists("1_data/processed/TROPOMI_imputed")) dir.create("1_data/processed/TROPOMI_imputed")
+projected_stars %>% 
+  select(TROPOMI_NO2_imputed) %>% 
+  write_stars(dsn = "1_data/processed/TROPOMI_imputed/S5P_OFFL_L2__NO2____2019_daily_imputed_AOI.nc")
+```
+
+
+
+

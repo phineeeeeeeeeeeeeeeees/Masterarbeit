@@ -1,0 +1,239 @@
+---
+title: 'Reduce computation cost: replace resampling with spatial look-up table'
+author: "Tze-Li Liu"
+date: "6/4/2021"
+output: html_document
+---
+```{R message=FALSE, warning=FALSE}
+library(stars) ; library(sf) 
+library(dplyr) ; library(tidyr) 
+library(ggplot2)
+library(lubridate) ; library(stringr)
+library(data.table)
+```
+
+```{R echo = FALSE}
+knitr::opts_knit$set(root.dir = "/Masterarbeit/analysis")
+```
+
+I am trying to reduce the computation cost required to preprocess the 100\*100m raster files as well as the storage space. This document discusses the possibility to by-pass the resampling to 100\*100m spatial resolution for the spatial-temporal predictors (OMI, TROPOMI, ERA, NDVI).   
+
+## Toy example
+
+In this vignette I am using a small area (Zürich canton) as an example. 
+
+```{R}
+# adm1
+Swiss_adm1 <- st_read("1_data/raw/Switzerland_shapefile/CHE_adm1.shp") %>% 
+  st_transform(st_crs(2056))
+# Zürich canton as an example
+ZH <- Swiss_adm1 %>% 
+  filter(str_detect(NAME_1 , "Zürich"))
+```
+
+I made a toy variable with random values across the study area. The toy example is stored as two rasters (`stars` objects), one with 1\*1km spatial resolution and the other one 100\*100m. 
+
+```{R}
+ZH_toy_values <- ZH %>% 
+  st_make_grid(n = c(5,8)) %>% 
+  st_as_sf() %>% 
+  mutate(value = sample(1:10 , nrow(.) , replace = TRUE)) %>% 
+  st_intersection(ZH %>% st_geometry())
+# 1*1km stars
+ZH_toy1000 <- ZH_toy_values %>% 
+  st_rasterize(crs = st_crs(2056) , dx = 1000 , dy = 1000)
+# 100*100m stars
+ZH_toy100 <- ZH_toy_values %>% 
+  st_rasterize(crs = st_crs(2056) , dx = 100 , dy = 100)
+```
+
+```{R fig.width = 9 , fig.height = 5}
+cowplot::plot_grid(
+  ggplot() +
+    geom_stars(data = ZH_toy1000) +
+    geom_sf(data = ZH_toy1000 %>% 
+              # convert the grids to polygon to visualize the grid cells
+              st_as_sf(as_points = FALSE) ,  
+            color = "azure1" , fill = NA , alpha = 0.5 , size = 0.1) +
+    geom_sf(data = ZH , fill = NA , color = "white") +
+    scale_fill_gradientn(colors = RColorBrewer::brewer.pal(5,"GnBu")) +
+    coord_sf(expand = FALSE) +
+    labs(title = "Toy raster: 1*1km" , x = "" , y = "") +
+    theme_bw() , 
+  ggplot() +
+    geom_stars(data = ZH_toy100) +
+    geom_sf(data = ZH_toy100 %>% 
+              # convert the grids to polygon to visualize the grid cells
+              st_as_sf(as_points = FALSE) ,  
+            color = "azure1" , fill = NA , alpha = 0.5 , size = 0.02) +
+    geom_sf(data = ZH , fill = NA , color = "white") +
+    scale_fill_gradientn(colors = RColorBrewer::brewer.pal(5,"GnBu")) +
+    coord_sf(expand = FALSE) +
+    labs(title = "Toy raster: 100*100m" , x = "" , y = "") +
+    theme_bw() , 
+  ncol = 2
+)
+```
+
+```{R}
+lobstr::obj_size(ZH_toy1000) / lobstr::obj_size(ZH_toy100)
+```
+
+The object size of the 1\*1km raster is only 1% of that of the 100\*100m raster, and the information carried is actually the same. For the input data of the model, I resampled the OMI, TROPOMI, and ERA datasets to 1\*1km with bilinear interpolation. Then the plan was to nearest-neighbor resample the 1\*1km raster time-series to 100\*100m. It does not change any pixel vales, but just in order to make the later stacking (for model projection) possible (same spatial extent and resolution required). This second step, however, is one of the bottleneck in terms of computation requirement as well as storage spacee (20GB for one variable).   
+
+What I am trying to do here is to keep these spatial-temporal datasets as 1\*1km spatial resolution. I use this 1\*1km raster time-series to extract the training data (with the monitoring site points). Later when I need to combine the variables together for the model projection, I find another way to link the 1\*1km pixel values to the co-locating 100\*100m pixel values (of the spatial predictor datasets) without resampling the whole datasets at the first place.  
+
+Therefore I am making a spatial look-up table for the 1\*1km raster, and use the look-up table to `join` the variables of 1\*1km spatial resolution to the variables of 100\*100m later for model projection. 
+
+## Benchmark: resampling 
+
+I first take a look at the time it takes to resample the 1\*1km raster to 100\*100m. We can compare the running time of the other methods to the time it takes to resample to have a general idea of the computation complexcity. 
+
+```{R}
+system.time(st_warp(ZH_toy1000 , ZH_toy100))
+```
+
+It's only 0.3 seconds. However this is just a small area. The data size explodes at a power of two when the area gets bigger. 
+
+## spatial join `st_join`
+
+This approach uses the function `sf::st_join` to identify co-locating pixels. First, the `stars` rasters have to be converted to vector data (`sf`), then join the two datasets by their spatial relation. 
+
+```{R}
+# spatial join with sf
+system.time({
+  # vectorize
+  ZH_toy1000_sf <- ZH_toy1000 %>% 
+    st_as_sf(as_points = FALSE , merge = FALSE) # coarse 1km as polygon
+  ZH_toy100_sf <- ZH_toy100 %>% 
+    st_as_sf(as_points = TRUE , merge = FALSE)  # finer 100m as points 
+  # spatial join
+  ZH_toy_join_sf <- st_join(ZH_toy1000_sf , ZH_toy100_sf , suffix = c("_1000", "_100"))
+})
+``` 
+
+```{R}
+head(ZH_toy_join_sf)
+```
+
+We have the 1\*1km and 100\*100 resolution datasets joined based on their coordinates. However this method takes 3 seconds, so it seems to be more complex than resampling the raster datasets. Another issue is the data size: 
+
+```{R}
+lobstr::obj_size(ZH_toy1000_sf) / lobstr::obj_size(ZH_toy1000)
+lobstr::obj_size(ZH_toy100_sf) / lobstr::obj_size(ZH_toy100)
+```
+
+`sf` objects are much larger (16-28X) than `stars` objects. This approach using `st_join` is not ideal to solve our problem. 
+
+## make a spatial look-up table
+
+This approach does the joining at the `data.frame` level of the raster datasets (`x`, `y`, `variable`) (for the actual application `date` as well), with the help of a **spatial look-up table** that indicates the spatially co-locating relation of the pixels of the two datasets with different spatial resolution. 
+
+#### data.frame
+
+```{R}
+# convert to data.frame
+ZH_toy1000_df <- ZH_toy1000 %>% 
+  # convert to data.frame
+  as.data.frame() %>% 
+  # when stars is converted to data.frame, 
+  # it contains the surrounding pixels with NA values (not actually in AOI) 
+  filter(!is.na(value)) # remove these NA pixels
+ZH_toy100_df <- ZH_toy100 %>% 
+  # convert to data.frame
+  as.data.frame() %>% 
+  # when stars is converted to data.frame, 
+  # it contains the surrounding pixels with NA values (not actually in AOI) 
+  filter(!is.na(value)) # remove these NA pixels
+```
+
+```{R}
+lobstr::obj_size(ZH_toy1000_df) / lobstr::obj_size(ZH_toy1000)
+lobstr::obj_size(ZH_toy100_df) / lobstr::obj_size(ZH_toy100)
+```
+
+It takes only a short time (<0.01 seconds) to convert the `stars` objects to `data.frame`. The object sizes of `data.frame` don't expand that much either (compared to `sf`: more than 15 times larger). 
+
+
+#### create the spatial look-up table
+
+How I make the spatial look-up table is: 
+
+* rasterize the study area with 1*1km spatial resolution ; 
+* give each pixel of the rasterized study area a unique ID (`cellID`) ;
+* resample this 1\*1km raster of the study area with `cellID` as the pixel values to 100\*100m resolution ; 
+* convert this resampled  100\*100m raster to `data.frame`: now I have a `data.frame` with the coordinates of the 100\*100m pixels as well as the ID of that pixel at 1\*1km resolution ; 
+* join the 1\*1km raster (as `data.frame`) using `cellID` as the key.  
+
+```{R}
+# 1km to 100m
+system.time({
+  ZH_grid1000 <- ZH %>% 
+    st_rasterize(crs = st_crs(2056) , dx = 1000 , dy = 1000) %>% 
+    # create a column/attribute: the ID of each 1*1km cell
+    mutate(cellID = 1:(dim(.)[1]*dim(.)[2]) %>% 
+             as.factor())
+  ZH_spatial.join.table <- ZH_grid1000 %>% # the 1*1km stars with cell IDs
+    select(cellID) %>% 
+    # resample this cell ID to 100m 
+    st_warp(ZH_toy100) %>% # I know which 100m cell each 1km cell locates
+    as.data.frame() %>% 
+    arrange(cellID) %>% 
+    # include the 1km-resolution x and y coordinates
+    left_join(as.data.frame(ZH_grid1000) , by = "cellID" , suffix = c("_100" , "_1000")) %>% 
+    select(cellID , starts_with("x") , starts_with("y"))
+}) 
+```
+
+
+
+```{R}
+head(ZH_spatial.join.table)
+```
+I get a table that tells me the corresponding relation between the pixel values of varying spatial resolutions: `x_100` and `y_100` are the coordinates of the pixels of the 100\*100m dataset, and `x_1000` and `y_1000` are the coordinates of the pixels of the 1\*1km dataset. It takes 0.3~0.4 seconds, pretty close to the benchmark. However, this step only has to be done once at the beginning (the resampling in the benchmark needs to be done several times for each 1\*1km variable). 
+
+#### joining using the spatial look-up table
+
+With the spatial look-up table, I am able to link the `data.frame` of the 1\*1km variables to the `data.frame` of the 100\*100m variables. 
+
+```{R}
+# joining
+system.time(
+  ZH_toy_join_df <- ZH_toy100_df %>% 
+    # the look-up table
+    left_join(ZH_spatial.join.table , by = c("x" = "x_100" , "y" = "y_100")) %>% 
+    # the 1km dataset
+    left_join(ZH_toy1000_df , by = c("x_1000" = "x" , "y_1000" = "y") , suffix = c("_100" , "_1000"))
+) 
+```
+
+It takes around only 0.1 seconds for this toy example. The result also looks just as what I anticipated: 
+
+```{R}
+head(ZH_toy_join_df)
+```
+
+Visualize the result as maps: 
+
+```{R fig.height = 5}
+ZH_toy_join_stars <- ZH_toy_join_df %>% 
+  select(x,y,starts_with("value")) %>% 
+  st_as_stars(dim = c("x" , "y"))
+ggplot() +
+  geom_stars(data =  ZH_toy_join_stars %>% merge()) +
+  geom_sf(data = ZH , fill = "NA" , color = "white" , size = 0.2) +
+  facet_grid(~attributes) +
+  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(5,"GnBu")) +
+  coord_sf(expand = FALSE) +
+  theme_bw()
+```
+
+The pixel values at 1\*1km resolution are successfully linked to 100\*100m resolution. The only flaw is the pixels near the boundary are partially cut.  
+
+The temporal dimension was not tested in this vignette, but it's just 365X rows for each pixel to join. 
+
+
+## Conclusion
+
+I am going to create a spatial look-up table for the whole AOI and **keep the spatial-temporal predictor datasets at 1\*1km (saving 99% of storage space and computation cost)**. When we are going to project the model prediction at the final steps, the 1\*1km pixel values can be linked to the 100\*100m spatial resolution.   
+

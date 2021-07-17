@@ -1,0 +1,171 @@
+---
+title: "Visualize spatialtemporal arrays with animation in R"
+author: "Tze-Li Liu"
+date: "5/19/2021"
+output: html_document
+---
+```{r echo = FALSE}
+knitr::opts_knit$set(root.dir = "/Masterarbeit/analysis")
+```
+
+```{R message = FALSE , warning = FALSE}
+library(stars) ; library(sf)
+library(dplyr) ; library(tidyr) 
+library(ggplot2) ; library(gganimate)
+library(lubridate) ; library(stringr)
+```
+
+This document demonstrates how to visualize spatialtemporal arrays (time-series of rasters) in `R`. 
+
+***
+
+# Import data
+
+### spatialtemporal array
+
+The example data is the daily OMI ColumnAmountNO2TropCloudScreened data, which has one `.tif` file for each day. There are 365 files in total. 
+
+```{R}
+files_OMI <- list.files("1_data/raw/OMI-NO2" ,  # directory of the files
+                        pattern = "_AOI.tif$" , # filtering files with naming patterns (optional)
+                        full.names = TRUE)      # with directory path
+```
+
+Here's an example of the first 6 files of the total 365 files. 
+
+```{R}
+head(files_OMI)
+```
+
+Since all the 365 raster files have the same spatial dimension, we can import them once and as a spatialtemporal array using the package `stars`. 
+
+```{R}
+OMI <- read_stars(files_OMI) # bad example
+dim(OMI)
+```
+
+This results in a `stars` object with two dimensions (`x`,`y`) and 365 attributes (bands). What we want is one attribute and 3 dimensions (`x`, `y`, `date`), so we need to assign the `along` argument in `read_stars` as the date.  
+
+```{R}
+# I first extract the date from the file names (OMI-Aura_L3-OMI_MINDS_NO2d_YYYYMMDD_AOI.tif)
+dates_OMI <- basename(files_OMI) %>% 
+  str_extract("\\d{8}") %>% 
+  as_date()
+# alternatively, you can assign the time stamps directly:
+# dates_OMI <- seq(as_date("2019-01-01") , as_date("2019-12-31") , "1 day")
+
+# then assign the date values to read_stars to set the third dimension
+OMI <- read_stars(files_OMI , 
+                  along = list(date = dates_OMI))  %>% # used a named list to assign the dimension
+  # rename the attibute name
+  setNames("value")
+```
+
+```{R}
+OMI
+```
+
+Here `OMI` is a `stars` with three dimensions: `x`, `y`, and `date`. 
+
+### shapefile
+
+I also import a shapefile of Switzerland to demonstrate how to add polygons on top of the rasters. 
+
+```{R}
+CH <- st_read("1_data/raw/Switzerland_shapefile/CHE_adm0.shp") %>% 
+  # exclude the attribute table
+  st_geometry() %>% 
+  # simplify to facilitate visualization
+  st_simplify(preserveTopology = TRUE , dTolerance = 0.05)
+```
+
+***
+
+# Visualize
+
+### static plot with `ggplot`
+
+* Use `ggplot() + geom_stars()` to map `stars` objects in ggplot  
+  * Use `facet_grid()` to make separate plots according to dimensions (`date`)
+  * (also possible to use more than one dimensions when there are multiple, but not demonstrated here)
+* Use `+ geom_sf()` to add polygons
+
+```{R fig.width = 10 , fig.height = 5}
+# for demonstration, I only visualize a 5-day time series 
+selected_dates <- interval("2019-07-15" , "2019-07-19")
+# I subset the original array using the date dimension value by:
+# OMI %>% 
+#   filter(date %within% selected_dates)
+
+ggplot() +
+  # plot the rasters
+  geom_stars(
+    data = OMI %>% 
+      filter(date %within% selected_dates)
+  ) +
+  # plot the polygon
+  geom_sf(data = CH , fill = NA , color = "white") +
+  # one plot per date (based on the dimension date of OMI)
+  facet_grid(~date) +
+  # set color for the rasters (optional)
+  scale_fill_viridis_c() + # high contrast color option
+  # optional settings
+  coord_sf(expand = FALSE) +
+  # labels (optional)
+  labs(x = "Longtitude" , y = "Latitude" , fill = "OMI-NO2")
+```
+
+
+### animation with `ggplot` and `gganimate`
+
+* Very similar to `ggplot`, just replace the `facet_grid(~date)` with `transition_time(date)`, which tells `gganimate` on which dimension the animation is based.  
+* Use `+labs(title = "Date: {frame_time})"` to add the date of each frame as title
+* The color scale used here is the default. If you want to set the limits manually, assign the `limits` argument in `scale_fill...()` as for example  `scale_fill_viridis_c(limits = c(0,1e16))`
+
+```{R eval = FALSE}
+# assign the plot to an object ()
+OMI_animation <- ggplot() +
+  # plot the rasters
+  geom_stars(
+    data = OMI
+  ) +
+  # plot the polygon
+  geom_sf(data = CH , fill = NA , color = "white") +
+  # one frame per date (based on the dimension date of OMI)
+  transition_time(date) +
+  # set color for the rasters (optional)
+  scale_fill_viridis_c() + # high contrast color option
+  # optional settings
+  coord_sf(expand = FALSE) +
+  # labels (optional)
+  labs(x = "Longtitude" , y = "Latitude" , fill = "OMI-NO2" , 
+       title = "Date: {frame_time}")  # use this to add the date as title
+```
+
+Because we have 365 days, the default pace of the animation is too fast. Therefore we assign the `ggplot+...` to an object and manually control the pace. 
+
+```{R eval = FALSE}
+animate(OMI_animation , 
+        duration = 365 , # 365 seconds in total
+        fps = 1)         # one frame per second
+```
+
+```{R eval = FALSE, message = FALSE , warning = FALSE , results = FALSE , echo = FALSE}
+animate(OMI_animation , 
+        duration = 365 , # 365 seconds in total
+        fps = 1)         # one frame per second
+anim_save(filename = "3_results/Markdown/animation/OMI_example.gif")
+```
+
+
+![](OMI_example.gif)
+
+You can save the animation to .gif files to a local directory
+
+```{R eval = FALSE}
+anim_save(filename = "3_results/Markdown/animation/OMI_example.gif")
+```
+
+
+
+

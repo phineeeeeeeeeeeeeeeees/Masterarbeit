@@ -1,0 +1,27 @@
+{
+    "id": "F5DF3B23",
+    "path": "/Masterarbeit/analysis/2_scripts/utils_model-eval.R",
+    "project_path": "2_scripts/utils_model-eval.R",
+    "type": "r_source",
+    "hash": "3720175854",
+    "contents": "",
+    "dirty": false,
+    "created": 1625857311912.0,
+    "source_on_save": false,
+    "relative_order": 10,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "207,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1626372381,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1626372381266,
+    "read_only": false,
+    "read_only_alternatives": []
+}
