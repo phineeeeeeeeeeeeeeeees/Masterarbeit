@@ -1,7 +1,6 @@
-<img src="https://www.swisstph.ch/typo3temp/assets/_processed_/c/6/csm_Logo_SwissTPH_print_ae656f8658.png" height=60> <img src="https://upload.wikimedia.org/wikipedia/de/f/f4/Albert-Ludwigs-Universit%C3%A4t_Freiburg_2009_logo.svg" height=80>
-
 ### Source code of the Master thesis: 
 # A comparison of selected statistical and  machine-learning approaches for spatiotemporal modeling of nitrogen dioxide  across Switzerland: with LUR and satellite-derived data
+<img src="https://www.swisstph.ch/typo3temp/assets/_processed_/c/6/csm_Logo_SwissTPH_print_ae656f8658.png" height=60> <img src="https://upload.wikimedia.org/wikipedia/de/f/f4/Albert-Ludwigs-Universit%C3%A4t_Freiburg_2009_logo.svg" height=80>
 
 ***
 * Master thesis project
