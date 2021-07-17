@@ -77,7 +77,7 @@ response_full <- data_monthly %>%
 # predictor
 # screening of important predictor variables
 # =====================================
-set.seed(123)
+set.seed(1010)
 xgb_screen <- xgboost(
   data = data_monthly %>% 
     select(-all_of(columns_nonpredictor)) %>% 

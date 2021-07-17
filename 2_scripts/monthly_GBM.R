@@ -52,7 +52,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Gradient boosting machine"
 model_abbr <- "GBM"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 
 # //////////////////////////////////////////////////////////////////////////
@@ -81,7 +81,7 @@ response_full <- data_monthly %>%
 # predictor
 # screening of important predictor variables
 # =====================================
-set.seed(123)
+set.seed(1010)
 xgb_screen <- xgboost(
   data = data_monthly %>% 
     select(-all_of(columns_nonpredictor)) %>% 
@@ -92,7 +92,7 @@ xgb_screen <- xgboost(
     # matrix
     as.matrix(), 
   label = response_full , 
-  nrounds = 100 , 
+  nrounds = 500 , 
   objective = "reg:squarederror" , 
   verbose = FALSE ,  # silent
   early_stopping_rounds = 5 # stop if no improvement for 5 consecutive trees
@@ -151,7 +151,7 @@ hyperparm_final <- hyper_grid %>%
   select(eta, max_depth, min_child_weight, subsample, colsample_bytree) %>% 
   as.list()
 #  eta  max_depth min_child_weight subsample colsample_bytree
-#  0.01         5                7      0.65              0.8
+#  0.1          3                5      0.65              0.8
 nrounds <- 450
 
 # =====================================
