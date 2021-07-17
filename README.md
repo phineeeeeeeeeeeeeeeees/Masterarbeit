@@ -1,4 +1,4 @@
-<img src="https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.swisstph.ch%2Fde%2F&psig=AOvVaw25iHP4py-ZcD_ntesYBdJV&ust=1626629218462000&source=images&cd=vfe&ved=0CAsQjRxqFwoTCMCKjZnQ6vECFQAAAAAdAAAAABAD" width = 100> <img src="" width = 100>
+![](https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.swisstph.ch%2Fde%2F&psig=AOvVaw25iHP4py-ZcD_ntesYBdJV&ust=1626629218462000&source=images&cd=vfe&ved=0CAsQjRxqFwoTCMCKjZnQ6vECFQAAAAAdAAAAABAD)
 
 ### Source code for the Master thesis: 
 # A comparison of selected statistical and  machine-learning approaches for Spatiotemporal modeling of nitrogen dioxide  across Switzerland: with LUR and satellite-derived data
