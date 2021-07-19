@@ -418,28 +418,28 @@ save_plot(
 {
   # export the model summary
   out_dirpath_lmsummary <- "3_results/output-data/model_annual/SLR_summary"
-  if(!dir.exists(out_dirpath_lmsummary)) dir.create(out_dirpath_lmsummary)
+  if(!dir.exists(out_dirpath_lmsummary)) dir.create(out_dirpath_lmsummary , recursive = TRUE)
   lm_SLR %>%
     broom::tidy() %>%
     write_csv(sprintf("%s/%s.csv" , out_dirpath_lmsummary , SAT_product))
   
   # export the predicted values
   out_dirpath_predicted <- "3_results/output-data/model_annual/observed-predicted"
-  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted)
+  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted , recursive = TRUE)
   lm_SLR_prediction %>% # <-
     mutate(model = model_abbr , product = SAT_product) %>%
     write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_predicted , model_abbr , SAT_product))
   
   # export the model performance indices
   out_dirpath_indices <- "3_results/output-data/model_annual/indices"
-  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices)
+  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices , recursive = TRUE)
   lm_SLR_indices %>% # <- 
     mutate(model = model_abbr , product = SAT_product) %>%
     write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_indices , model_abbr , SAT_product))
   
   # Moran's I
   out_dirpath_Moran <- "3_results/output-data/model_annual/Moran"
-  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran)
+  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran , recursive = TRUE)
   moran_df %>% 
     pivot_longer(cols = everything()) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%

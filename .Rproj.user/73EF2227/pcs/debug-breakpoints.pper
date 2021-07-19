@@ -615,6 +615,21 @@
                 "type": 1,
                 "is_package_breakpoint": false,
                 "package_name": ""
+            },
+            {
+                "id": 81,
+                "path": "/Masterarbeit/analysis/2_scripts/monthly_SLR.R",
+                "line_number": 486,
+                "function_steps": "",
+                "function_name": "toplevel",
+                "state": 1,
+                "editor_state": 1,
+                "editor_line_number": 486,
+                "is_pending_debug_completion": false,
+                "needs_updated_steps": false,
+                "type": 1,
+                "is_package_breakpoint": false,
+                "package_name": ""
             }
         ]
     }

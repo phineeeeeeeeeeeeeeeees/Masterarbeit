@@ -51,7 +51,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Supervised stepwise linear mixed-effect regression"
 model_abbr <- "SLMER"
-SAT_product <- c("OMI" , "TROPOMI")[1]
+SAT_product <- c("OMI" , "TROPOMI")[2]
 
 # //////////////////////////////////////////////////////////////////////////
 # data inspection
@@ -59,12 +59,12 @@ SAT_product <- c("OMI" , "TROPOMI")[1]
 # =====================================
 # distribution of [NO2]
 # =====================================
-data_monthly_raw %>% 
-  ggplot(aes(x = NO2)) +
-  geom_histogram() +
-  labs(x = expression("NO"[2]) , y = "Count" , 
-       title = "Histogram of the monthly average concentration") +
-  theme_bw()
+# data_monthly_raw %>% 
+#   ggplot(aes(x = NO2)) +
+#   geom_histogram() +
+#   labs(x = expression("NO"[2]) , y = "Count" , 
+#        title = "Histogram of the monthly average concentration") +
+#   theme_bw()
 
 
 # //////////////////////////////////////////////////////////////////////////
@@ -433,6 +433,11 @@ save_plot(
 # residuals by month
 plot_resid_month(lmer_SLR_prediction , 
                  subtitle_text = sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
+save_plot(
+  sprintf("%s/residuals-month_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 6 , base_height = 3
+)
 
 # =====================================
 # spatial autocorrelation of the residuals
@@ -448,3 +453,45 @@ save_plot(
   plot = last_plot() , 
   base_width = 6 , base_height = 4
 )
+
+# =====================================
+# export datasets
+# =====================================
+{
+  # export the predicted values
+  out_dirpath_predicted <- "3_results/output-data/model_monthly/observed-predicted"
+  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted , recursive = TRUE)
+  lmer_SLR_prediction %>% # <-
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_predicted , model_abbr , SAT_product))
+  
+  # export the model performance indices
+  out_dirpath_indices <- "3_results/output-data/model_monthly/indices"
+  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices , recursive = TRUE)
+  lmer_SLR_indices %>% # <- 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_indices , model_abbr , SAT_product))
+  
+  # Moran's I
+  out_dirpath_Moran <- "3_results/output-data/model_monthly/Moran"
+  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran , recursive = TRUE)
+  moran_month_df %>% 
+    pivot_longer(cols = -month) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+  moran_mean_df %>% 
+    pivot_longer(cols = everything()) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/mean_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+}
+
+# =====================================
+# export model
+# =====================================
+{
+  out_dirpath_model <- "3_results/output-model/model_monthly"
+  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model , recursive = TRUE)
+  saveRDS(lmer_SLR , # <-
+          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+}
+

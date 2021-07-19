@@ -82,18 +82,17 @@ SAT_product <- c("OMI" , "TROPOMI")[1]
 data_monthly_raw <- data_monthly_raw %>% 
   group_modify( ~ {
     # period = 12
-    phi <- .x %>% 
-      select(date , Station_name , NO2) %>% 
-      mutate(date = yday(date)) %>% 
-      mutate(z1 = cos(2*pi*date/12) , 
-             z2 = sin(2*pi*date/12)) %>% 
+    phi <<- .x %>% 
+      select(month , Station_name , NO2) %>% 
+      mutate(z1 = cos(2*pi*month/12) , 
+             z2 = sin(2*pi*month/12)) %>% 
       group_modify( ~ {
         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
         atan(-(x[2]/x[1]))
       }) 
     # transformation
     .x %>% 
-      mutate(day_trans_365 = cos(2 * pi *yday(date)/365 + phi))
+      mutate(month_trans = cos(2 * pi * month/12 + phi))
   }) 
 
 
@@ -107,14 +106,14 @@ data_monthly_raw <- data_monthly_raw %>%
 #   theme_bw()
 
 # # more a linear relationship now
-# data_monthly_raw %>% 
-#   group_by(month , Type_of_station , month_trans) %>% 
-#   summarize(mean = mean(NO2 , na.rm = TRUE) , 
-#             sd = sd(NO2 , na.rm = TRUE)) %>% 
-#   ungroup() %>% 
+# data_monthly_raw %>%
+#   group_by(month , Type_of_station , month_trans) %>%
+#   summarize(mean = mean(NO2 , na.rm = TRUE) ,
+#             sd = sd(NO2 , na.rm = TRUE)) %>%
+#   ungroup() %>%
 #   ggplot(aes(x = month_trans , y = mean , group = Type_of_station)) +
 #   geom_point(aes(color = Type_of_station)) +
-#   scale_x_continuous(breaks = cos(2 * pi * 1:12/12 + phi) , 
+#   scale_x_continuous(breaks = cos(2 * pi * 1:12/12 + phi) ,
 #                      labels = 1:12) +
 #   labs(y = "Mean concentration") +
 #   theme_bw()
@@ -330,27 +329,6 @@ data_monthly_raw <- data_monthly_raw %>%
   # the end
 }
 
-# # month as a numeric variable
-# formula_SLR_final <- included_var %>%
-#   paste(collapse = "+") %>%
-#   sprintf("NO2~%s+month" , .) %>%
-#   formula()
-# # month as a categorical variable
-# data_monthly <- data_monthly %>%
-#   mutate(month = factor(month))
-# formula_SLR_final <- included_var %>%
-#   paste(collapse = "+") %>%
-#   sprintf("NO2~%s+month" , .) %>%
-#   formula()
-# # month with cosine transformation
-# formula_SLR_final <- ifelse(
-#   "month_trans" %in% included_var , 
-#   formula_SLR_final , 
-#   included_var %>%
-#     paste(collapse = "+") %>%
-#     sprintf("NO2~%s+month_trans" , .) %>%
-#     formula()
-# )
 
 # =====================================
 # cross validation
@@ -407,7 +385,7 @@ for(k in as.factor(1:k_fold)){
 }
 
 # temporal cross validation
-for(k in unique(data_monthly$month)){
+for(k in 1:12){
   # partition
   training.data <- data_monthly %>% filter(month != k)
   testing.data <- data_monthly %>% filter(month == k)
@@ -475,10 +453,6 @@ lm_SLR_prediction <- data_monthly %>%
 lm_SLR_indices <- lm_SLR_prediction %>% 
   eval_performance_indices()
 
-lm_SLR_indices %>% 
-  select(-min , -max) %>% 
-  pivot_wider(names_from = type , values_from = value)
-
 # =====================================
 # visualization
 # =====================================
@@ -509,8 +483,11 @@ save_plot(
 # residuals by month
 plot_resid_month(lm_SLR_prediction , 
                  subtitle_text = sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
-#save_plot
-
+save_plot(
+  sprintf("%s/residuals-month_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 6 , base_height = 3
+)
 # =====================================
 # spatial autocorrelation of the residuals
 # =====================================
@@ -530,49 +507,52 @@ save_plot(
 # =====================================
 # temporal autocorrelation of the residuals
 # =====================================
-lm_SLR_prediction %>% 
-  ggplot(aes(x = month , y = residual , color = Type_of_station)) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~Station_name)
-
-lm_SLR_prediction %>% 
-  arrange(month , Station_name) %>% 
-  filter(Station_name == "Aarau-Buchenhof") %>% 
-  select(residual) %>% 
-  unlist() %>% 
-  diff() %>% 
-  astsa::acf2(plot = FALSE) %>% as_tibble() %>% mutate(lag = 1:n())
-
-lm_SLR_prediction %>% 
-  arrange(month , Station_name) %>% 
-  group_by(Station_name) %>% 
-  group_modify(
-    ~ diff(.x$residual) %>% astsa::acf2(plot = FALSE) %>% as_tibble %>% mutate(lag = 1:n()) , 
-    .keep = TRUE
-  ) %>% 
-  ungroup() %>% 
-  pivot_longer(cols = c(ACF , PACF)) %>% 
-  group_by(Station_name) %>% 
-  mutate(plot_row = cur_group_id() %%6 ) %>% 
-  ungroup() %>% 
-  group_by(plot_row) %>% 
-  group_map(
-    ~ ggplot(.x , aes(x = lag , y = value)) +
-      geom_bar(stat = "identity" , width = 0.4) +
-      facet_grid(name~Station_name , scales = "free_y") +
-      theme_bw() +
-      theme(strip.text.x = element_text(size = 5))
-  ) %>% 
-  cowplot::plot_grid(plotlist = . , align = "v" , axis = "lr" , nrow = 6 , byrow = TRUE)
-  
-
-
-
-
-
 
 
 # =====================================
 # export datasets
 # =====================================
+{
+  # export the model summary
+  out_dirpath_lmsummary <- "3_results/output-data/model_monthly/SLR_summary"
+  if(!dir.exists(out_dirpath_lmsummary)) dir.create(out_dirpath_lmsummary , recursive = TRUE)
+  lm_SLR %>%
+    broom::tidy() %>%
+    write_csv(sprintf("%s/%s.csv" , out_dirpath_lmsummary , SAT_product))
+  
+  # export the predicted values
+  out_dirpath_predicted <- "3_results/output-data/model_monthly/observed-predicted"
+  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted , recursive = TRUE)
+  lm_SLR_prediction %>% # <-
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_predicted , model_abbr , SAT_product))
+  
+  # export the model performance indices
+  out_dirpath_indices <- "3_results/output-data/model_monthly/indices"
+  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices , recursive = TRUE)
+  lm_SLR_indices %>% # <- 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_indices , model_abbr , SAT_product))
+  
+  # Moran's I
+  out_dirpath_Moran <- "3_results/output-data/model_monthly/Moran"
+  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran , recursive = TRUE)
+  moran_month_df %>% 
+    pivot_longer(cols = -month) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+  moran_mean_df %>% 
+    pivot_longer(cols = everything()) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/mean_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+}
+
+# =====================================
+# export model
+# =====================================
+{
+  out_dirpath_model <- "3_results/output-model/model_monthly"
+  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model , recursive = TRUE)
+  saveRDS(lm_SLR , # <-
+          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+}
