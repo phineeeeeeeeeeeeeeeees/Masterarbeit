@@ -488,6 +488,7 @@ save_plot(
   plot = last_plot() , 
   base_width = 6 , base_height = 3
 )
+
 # =====================================
 # spatial autocorrelation of the residuals
 # =====================================

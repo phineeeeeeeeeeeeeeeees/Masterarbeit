@@ -44,8 +44,7 @@ data_daily_raw <- data_daily_raw %>%
 # non-predictor columns
 columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_station" , 
                           "Altitude" , "Canton_ID" , "Canton_name" , "X" , "Y" , 
-                          "CV" , "spatial_CV" , 
-                          "date")
+                          "CV" , "spatial_CV" , "date" , "NO2_original")
 
 # //////////////////////////////////////////////////////////////////////////
 # naming the model
@@ -60,15 +59,31 @@ SAT_product <- c("OMI" , "TROPOMI")[1]
 # =====================================
 # distribution of [NO2]
 # =====================================
-data_daily_raw %>%
-  ggplot(aes(x = NO2)) +
-  #ggplot(aes(x = sqrt(NO2+1))) +
-  geom_histogram() +
-  labs(x = expression(sqrt("([NO"[2]*"]+1)")) , y = "Count" ,
-       title = "Histogram of the daily concentration") +
-  theme_bw()
-data_daily_raw <- data_daily_raw %>% 
-  mutate(NO2 = sqrt(NO2+1))
+cowplot::plot_grid(
+  data_daily_raw %>%
+    ggplot(aes(x = NO2)) +
+    geom_histogram() +
+    labs(x = expression("[NO"[2]*"]") , y = "Count" ,
+         title = "Raw values") +
+    theme_bw() , 
+  data_daily_raw %>%
+    #ggplot(aes(x = NO2)) +
+    ggplot(aes(x = sqrt(NO2+1))) +
+    geom_histogram() +
+    labs(x = expression(sqrt("([NO"[2]*"]+1)")) , y = "Count" ,
+         title = expression(sqrt("([NO"[2]*"]+1)"))) +
+    theme_bw() , 
+  ncol = 2 , axis = "tb" , align = "h"
+) %>% 
+  plot_grid(
+    ggdraw() + 
+      draw_label("Histogram of the daily monitored concentration values" , x = 0, hjust = 0) +
+      theme(plot.margin = margin(0, 0, 0, 15)) , 
+    . , 
+    ncol = 1,
+    rel_heights = c(0.1, 1)
+  )
+# -> square-root transformation for NO2
 
 # //////////////////////////////////////////////////////////////////////////
 # supervised stepwise linear regression algorithm
@@ -78,11 +93,17 @@ data_daily_raw <- data_daily_raw %>%
   if(SAT_product == "OMI"){
     # for the OMI model: exclude TROPOMI and meteorological variables at 12H
     data_daily <- data_daily_raw %>% 
-      select(-TROPOMI_NO2 , -ends_with("_12H")) 
+      select(-TROPOMI_NO2 , -ends_with("_12H")) %>% 
+      # square-root transformation for NO2
+      mutate(NO2_original = NO2 , 
+             NO2 = sqrt(NO2+1))
   }else if(SAT_product == "TROPOMI"){
     # for the TROPOMI model: exclude OMI and meteorological variables at 15H
     data_daily <- data_daily_raw %>% 
-      select(-OMI_NO2 , -ends_with("_15H")) 
+      select(-OMI_NO2 , -ends_with("_15H")) %>% 
+      # square-root transformation for NO2
+      mutate(NO2_original = NO2 , 
+             NO2 = sqrt(NO2+1))
   }
   # =====================================
   # expected direction of effect: 
@@ -260,10 +281,17 @@ data_daily_raw <- data_daily_raw %>%
       ) 
     if(all(model_p_VIF$p.value < 0.1) & all(model_p_VIF$VIF < 3)){
       # if every variable is p<0.1 and VIF<3 : done
-      formula_SLR_final <- included_var %>% 
-        paste(collapse = "+") %>% 
-        sprintf("NO2~%s + (1|date)" , .) %>% 
-        formula() 
+      if(SAT_product == "OMI"){
+        formula_SLR_final <- included_var %>% 
+          paste(collapse = "+") %>% 
+          sprintf("NO2~%s + (OMI_NO2|date)" , .) %>%  # random intercept + random slope (SAT)
+          formula() 
+      }else if(SAT_product == "TROPOMI"){
+        formula_SLR_final <- included_var %>% 
+          paste(collapse = "+") %>% 
+          sprintf("NO2~%s + (TROPOMI_NO2|date)" , .) %>%   # random intercept + random slope (SAT)
+          formula() 
+      }
       break
     }else{
       included_var <- model_p_VIF %>% 
@@ -394,6 +422,10 @@ lmer_SLR_prediction <- data_daily %>%
   # CV-prediction
   full_join(lmer_SLR_prediction_CV , 
             by = c("Station_name" , "NO2" , "Type_of_station" , "date")) %>% 
+  # back-transform NO2
+  mutate(NO2 = NO2^2-1) %>%
+  # back-transform predicted values
+  mutate(across(starts_with("predicted") , function(x)x^2-1)) %>%
   # residuals
   mutate(residual = NO2 - predicted , 
          residual_CV = NO2 - predicted_CV , 
@@ -410,7 +442,7 @@ lmer_SLR_indices <- lmer_SLR_prediction %>%
 # =====================================
 # visualization
 # =====================================
-out_dirpath_plots <- sprintf("3_results/output-graph/model_monthly/%s" , model_abbr)
+out_dirpath_plots <- sprintf("3_results/output-graph/model_daily/%s" , model_abbr)
 if(!dir.exists(out_dirpath_plots)) dir.create(out_dirpath_plots , recursive = TRUE)
 
 # diagnostic plot
@@ -437,6 +469,11 @@ save_plot(
 # residuals by month
 plot_resid_month(lmer_SLR_prediction , 
                  subtitle_text = sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
+save_plot(
+  sprintf("%s/residuals-month_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 6 , base_height = 3
+)
 
 # =====================================
 # spatial autocorrelation of the residuals
@@ -453,3 +490,45 @@ save_plot(
   plot = last_plot() , 
   base_width = 6 , base_height = 4
 )
+
+# =====================================
+# export datasets
+# =====================================
+{
+  # export the predicted values
+  out_dirpath_predicted <- "3_results/output-data/model_daily/observed-predicted"
+  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted , recursive = TRUE)
+  lmer_SLR_prediction %>% # <-
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_predicted , model_abbr , SAT_product))
+  
+  # export the model performance indices
+  out_dirpath_indices <- "3_results/output-data/model_daily/indices"
+  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices , recursive = TRUE)
+  lmer_SLR_indices %>% # <- 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_indices , model_abbr , SAT_product))
+  
+  # Moran's I
+  out_dirpath_Moran <- "3_results/output-data/model_daily/Moran"
+  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran , recursive = TRUE)
+  moran_day_df %>% 
+    pivot_longer(cols = -date) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+  moran_mean_df %>% 
+    pivot_longer(cols = everything()) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/mean_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+}
+
+# =====================================
+# export model
+# =====================================
+{
+  out_dirpath_model <- "3_results/output-model/model_daily"
+  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model , recursive = TRUE)
+  saveRDS(lmer_SLR , # <-
+          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+}
+

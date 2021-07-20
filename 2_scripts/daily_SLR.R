@@ -43,7 +43,7 @@ data_daily_raw <- data_daily_raw %>%
 # non-predictor columns
 columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_station" , 
                           "Altitude" , "Canton_ID" , "Canton_name" , "X" , "Y" , 
-                          "CV" , "spatial_CV" , "date")
+                          "CV" , "spatial_CV" , "date" , "NO2_original")
 
 # //////////////////////////////////////////////////////////////////////////
 # naming the model
@@ -58,48 +58,40 @@ SAT_product <- c("OMI" , "TROPOMI")[2]
 # =====================================
 # distribution of [NO2]
 # =====================================
-data_daily_raw %>%
-  #ggplot(aes(x = NO2)) +
-  ggplot(aes(x = sqrt(NO2+1))) +
-  geom_histogram() +
-  labs(x = expression(sqrt("([NO"[2]*"]+1)")) , y = "Count" ,
-       title = "Histogram of the daily concentration") +
-  theme_bw()
-data_daily_raw$NO2 <- sqrt(data_daily_raw$NO2 + 1)
+cowplot::plot_grid(
+  data_daily_raw %>%
+    ggplot(aes(x = NO2)) +
+    geom_histogram() +
+    labs(x = expression("[NO"[2]*"]") , y = "Count" ,
+         title = "Raw values") +
+    theme_bw() , 
+  data_daily_raw %>%
+    #ggplot(aes(x = NO2)) +
+    ggplot(aes(x = sqrt(NO2+1))) +
+    geom_histogram() +
+    labs(x = expression(sqrt("([NO"[2]*"]+1)")) , y = "Count" ,
+         title = expression(sqrt("([NO"[2]*"]+1)"))) +
+    theme_bw() , 
+  ncol = 2 , axis = "tb" , align = "h"
+) %>% 
+  plot_grid(
+    ggdraw() + 
+      draw_label("Histogram of the daily monitored concentration values" , x = 0, hjust = 0) +
+      theme(plot.margin = margin(0, 0, 0, 15)) , 
+    . , 
+    ncol = 1,
+    rel_heights = c(0.1, 1)
+  )
+# -> square-root transformation for NO2
 
-# =====================================
-# weekly variation
-# =====================================
-# data_daily_raw %>% 
-#   mutate(date = yday(date)) %>% 
-#   filter(!is.na(NO2)) %>% 
-#   # loess-trend
-#   group_by(Station_name) %>% 
-#   group_modify( ~ loess(NO2 ~ date , data = .x , span = 1) %>% 
-#                   predict(date = .x$date) %>% 
-#                   as_tibble %>% 
-#                   rename(NO2_trend = value) %>% 
-#                   bind_cols(data.frame(date = .x$date))) %>% 
-#   mutate(date = as_date(date , origin = "2018-12-31")) %>% 
-#   # original value
-#   left_join(
-#     data_daily_raw %>% select(Station_name , NO2 , date , Type_of_station) , 
-#     by = c("Station_name" , "date")
-#   ) %>% 
-#   # de-trend
-#   mutate(NO2_detrend = NO2 - NO2_trend) %>% 
-#   mutate(wday = wday(date) %>% factor) %>% 
-#   ggplot(aes(x = wday , y = NO2_detrend)) +
-#   geom_boxplot() +
-#   facet_grid(Type_of_station ~ . )
 
 # =====================================
 # daily variation
 # =====================================
-# data_daily_raw %>% 
-#   group_by(Type_of_station , date) %>% 
-#   summarize(mean = mean(NO2 , na.rm = TRUE) , 
-#             sd = sd(NO2 , na.rm = TRUE)) %>% 
+# data_daily_raw %>%
+#   group_by(Type_of_station , date) %>%
+#   summarize(mean = mean(NO2 , na.rm = TRUE) ,
+#             sd = sd(NO2 , na.rm = TRUE)) %>%
 #   ggplot(aes(x = date , y = mean)) +
 #   geom_ribbon(aes(ymin = mean-1.96*sd , ymax = mean+1.96*sd) , alpha = 0.4) +
 #   geom_line() +
@@ -108,85 +100,109 @@ data_daily_raw$NO2 <- sqrt(data_daily_raw$NO2 + 1)
 #   theme_bw()
 # 
 # # spectral density
-# spec_daily <- data_daily_raw %>% 
+# spec_daily <- data_daily_raw %>%
 #   # pooling by station type
-#   group_by(Type_of_station , date) %>% 
-#   summarize(mean = mean(NO2 , na.rm = TRUE) , 
-#             sd = sd(NO2 , na.rm = TRUE)) %>% 
+#   group_by(Type_of_station , date) %>%
+#   summarize(mean = mean(NO2 , na.rm = TRUE) ,
+#             sd = sd(NO2 , na.rm = TRUE)) %>%
 #   # first-order differencing detrending
-#   group_by(Type_of_station) %>% 
-#   summarize(y = diff(mean)) %>% 
+#   group_by(Type_of_station) %>%
+#   summarize(y = diff(mean)) %>%
 #   # spectral density estimation
 #   group_modify(
-#     ~ astsa::mvspec(.x$y , spans = 3 , plot = FALSE) %>% .$details %>% as_tibble()
-#   )
+#     ~ astsa::mvspec(.x$y , spans = 5 , plot = FALSE) %>% .$details %>% as_tibble()
+#   ) %>% 
+#   ungroup()
 # 
 # # visualization: spectral density of the pooled annual average concentration time series
-# spec_daily %>% 
+# spec_daily %>%
 #   ggplot(aes(x = frequency , y = spectrum)) +
 #   geom_line() +
 #   facet_grid(Type_of_station~. , scales = "free_y") +
 #   labs(x = "Frequency" , y = "Spectrum density") +
-#   theme_bw() 
+#   theme_bw()
 # # weekly cycle can be observed as the dominant frequency
 
 
 # fit cosine wave: DOY, weekly cycle
-data_daily_raw <- data_daily_raw %>% 
+# data_daily_raw <- data_daily_raw %>%
+#   group_modify( ~ {
+#     # period = 365
+#     phi_365 <- .x %>%
+#       select(date , Station_name , NO2) %>%
+#       mutate(date = yday(date)) %>%
+#       mutate(z1 = cos(2*pi*date/365) ,
+#              z2 = sin(2*pi*date/365)) %>%
+#       group_modify( ~ {
+#         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
+#         atan(-(x[2]/x[1]))
+#       })
+#     # transformation
+#     .x %>%
+#       mutate(day_trans = cos(2 * pi *yday(date)/365 + phi_365))
+#   })
+data_daily_raw <- data_daily_raw %>%
   group_modify( ~ {
     # period = 365
-    phi_365 <- .x %>% 
-      select(date , Station_name , NO2) %>% 
-      mutate(date = yday(date)) %>% 
-      mutate(z1 = cos(2*pi*date/365) , 
-             z2 = sin(2*pi*date/365)) %>% 
+    phi_365 <- .x %>%
+      select(date , Station_name , NO2) %>%
+      mutate(date = yday(date)) %>%
+      mutate(z1 = cos(2*pi*date/365) ,
+             z2 = sin(2*pi*date/365)) %>%
       group_modify( ~ {
         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
         atan(-(x[2]/x[1]))
-      }) 
+      })
+    # period = 7
+    phi_7 <- .x %>%
+      select(date , Station_name , NO2) %>%
+      mutate(date = yday(date)) %>%
+      mutate(z1 = cos(2*pi*date/7) ,
+             z2 = sin(2*pi*date/7)) %>%
+      group_modify( ~ {
+        x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
+        atan(-(x[2]/x[1]))
+      })
+    # period = 3.5
+    phi_3.5 <- .x %>%
+      select(date , Station_name , NO2) %>%
+      mutate(date = yday(date)) %>%
+      mutate(z1 = cos(2*pi*date/3.5) ,
+             z2 = sin(2*pi*date/3.5)) %>%
+      group_modify( ~ {
+        x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
+        atan(-(x[2]/x[1]))
+      })
     # transformation
-    .x %>% 
-      mutate(day_trans_365 = cos(2 * pi *yday(date)/365 + phi_365))
-  }) 
-# data_daily_raw <- data_daily_raw %>% 
-#   group_modify( ~ {
-#     # period = 365
-#     phi_365 <- .x %>% 
-#       select(date , Station_name , NO2) %>% 
-#       mutate(date = yday(date)) %>% 
-#       mutate(z1 = cos(2*pi*date/365) , 
-#              z2 = sin(2*pi*date/365)) %>% 
-#       group_modify( ~ {
-#         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
-#         atan(-(x[2]/x[1]))
-#       }) 
-#     # period = 7
-#     phi_7 <- .x %>% 
-#       select(date , Station_name , NO2) %>% 
-#       mutate(date = yday(date)) %>% 
-#       mutate(z1 = cos(2*pi*date/7) , 
-#              z2 = sin(2*pi*date/7)) %>% 
-#       group_modify( ~ {
-#         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
-#         atan(-(x[2]/x[1]))
-#       }) 
-#     # period = 3.5
-#     phi_3.5 <- .x %>% 
-#       select(date , Station_name , NO2) %>% 
-#       mutate(date = yday(date)) %>% 
-#       mutate(z1 = cos(2*pi*date/3.5) , 
-#              z2 = sin(2*pi*date/3.5)) %>% 
-#       group_modify( ~ {
-#         x <- lm(NO2 ~ 0+z1+z2 , data = .x) %>% coef %>% unname
-#         atan(-(x[2]/x[1]))
-#       }) 
-#     # transformation
-#     .x %>% 
-#       mutate(day_trans_365 = cos(2 * pi *yday(date)/365 + phi_365) , 
-#              day_trans_7 = cos(2 * pi *yday(date)/7 + phi_7) , 
-#              day_trans_3.5 = cos(2 * pi *yday(date)/3.5 + phi_3.5))
-#   }) 
+    .x %>%
+      mutate(day_trans = cos(2 * pi *yday(date)/365 + phi_365) ,
+             day_trans_7 = cos(2 * pi *yday(date)/7 + phi_7) ,
+             day_trans_3.5 = cos(2 * pi *yday(date)/3.5 + phi_3.5))
+  })
 
+# # weekly variation
+# data_daily_raw %>%
+#   mutate(date = yday(date)) %>%
+#   filter(!is.na(NO2)) %>%
+#   # loess-trend
+#   group_by(Station_name) %>%
+#   group_modify( ~ loess(NO2 ~ date , data = .x , span = 1) %>%
+#                   predict(date = .x$date) %>%
+#                   as_tibble %>%
+#                   rename(NO2_trend = value) %>%
+#                   bind_cols(data.frame(date = .x$date))) %>%
+#   mutate(date = as_date(date , origin = "2018-12-31")) %>%
+#   # original value
+#   left_join(
+#     data_daily_raw %>% select(Station_name , NO2 , date , Type_of_station) ,
+#     by = c("Station_name" , "date")
+#   ) %>%
+#   # de-trend
+#   mutate(NO2_detrend = NO2 - NO2_trend) %>%
+#   mutate(wday = wday(date) %>% factor) %>%
+#   ggplot(aes(x = wday , y = NO2_detrend)) +
+#   geom_boxplot() +
+#   facet_grid(Type_of_station ~ . )
 
 # data_daily_raw %>% 
 #   pivot_longer(cols = starts_with("day_trans")) %>% 
@@ -213,11 +229,17 @@ data_daily_raw <- data_daily_raw %>%
   if(SAT_product == "OMI"){
     # for the OMI model: exclude TROPOMI and meteorological variables at 12H
     data_daily <- data_daily_raw %>% 
-      select(-TROPOMI_NO2 , -ends_with("_12H")) 
+      select(-TROPOMI_NO2 , -ends_with("_12H")) %>% 
+      # square-root transformation for NO2
+      mutate(NO2_original = NO2 , 
+             NO2 = sqrt(NO2+1))
   }else if(SAT_product == "TROPOMI"){
     # for the TROPOMI model: exclude OMI and meteorological variables at 15H
     data_daily <- data_daily_raw %>% 
-      select(-OMI_NO2 , -ends_with("_15H")) 
+      select(-OMI_NO2 , -ends_with("_15H")) %>% 
+      # square-root transformation for NO2
+      mutate(NO2_original = NO2 , 
+             NO2 = sqrt(NO2+1))
   }
   # =====================================
   # expected direction of effect: 
@@ -269,6 +291,7 @@ data_daily_raw <- data_daily_raw %>%
   # =====================================
   # 2. initial model: the predictor variable with the highest adj-R2 & expected direction of effect
   # =====================================
+  if(SAT_product == "spatial"){
     included_var_initial <- model_R2_initial %>%
       left_join(model_coefs_initial , by = "predictors") %>%
       # direction of effect as the defined prior
@@ -277,27 +300,18 @@ data_daily_raw <- data_daily_raw %>%
       slice(1) %>%
       select(predictors) %>%
       unlist() %>% unname
-  # if(SAT_product == "spatial"){
-  #   included_var_initial <- model_R2_initial %>%
-  #     left_join(model_coefs_initial , by = "predictors") %>%
-  #     # direction of effect as the defined prior
-  #     filter(consistent) %>%
-  #     # the predictor with the highest adj-R2
-  #     slice(1) %>%
-  #     select(predictors) %>%
-  #     unlist() %>% unname
-  # }else if(SAT_product %in% c("OMI" , "TROPOMI")){
-  #   # forcing OMI/TROPOMI to enter the model
-  #   included_var_initial <- model_R2_initial %>%
-  #     left_join(model_coefs_initial , by = "predictors") %>%
-  #     filter(str_detect(predictors , "OMI_NO2")) %>%
-  #     # direction of effect as the defined prior
-  #     filter(consistent) %>%
-  #     # the predictor with the highest adj-R2
-  #     slice(1) %>%
-  #     select(predictors) %>%
-  #     unlist() %>% unname
-  # }
+  }else if(SAT_product %in% c("OMI" , "TROPOMI")){
+    # forcing OMI/TROPOMI to enter the model
+    included_var_initial <- model_R2_initial %>%
+      left_join(model_coefs_initial , by = "predictors") %>%
+      filter(str_detect(predictors , "OMI_NO2")) %>%
+      # direction of effect as the defined prior
+      filter(consistent) %>%
+      # the predictor with the highest adj-R2
+      slice(1) %>%
+      select(predictors) %>%
+      unlist() %>% unname
+  }
   
   # =====================================
   # 3. sequentially adding predictor variables
@@ -536,6 +550,10 @@ lm_SLR_prediction <- data_daily %>%
   # CV-prediction
   full_join(lm_SLR_prediction_CV , 
             by = c("Station_name" , "NO2" , "Type_of_station" , "date")) %>% 
+  # back-transform NO2
+  mutate(NO2 = NO2^2-1) %>%
+  # back-transform predicted values
+  mutate(across(starts_with("predicted") , function(x)x^2-1)) %>%
   # residuals
   mutate(residual = NO2 - predicted , 
          residual_CV = NO2 - predicted_CV , 
@@ -552,7 +570,7 @@ lm_SLR_indices <- lm_SLR_prediction %>%
 # =====================================
 # visualization
 # =====================================
-out_dirpath_plots <- sprintf("3_results/output-graph/model_monthly/%s" , model_abbr)
+out_dirpath_plots <- sprintf("3_results/output-graph/model_daily/%s" , model_abbr)
 if(!dir.exists(out_dirpath_plots)) dir.create(out_dirpath_plots , recursive = TRUE)
 
 # diagnostic plot
@@ -579,11 +597,16 @@ save_plot(
 # residuals by month
 plot_resid_month(lm_SLR_prediction , 
                  subtitle_text = sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
+save_plot(
+  sprintf("%s/residuals-month_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 6 , base_height = 3
+)
 
 # =====================================
 # spatial autocorrelation of the residuals
 # =====================================
-moran_month_df <- eval_resid_moran(lm_SLR_prediction , by_time = TRUE , col_time = "month")
+moran_day_df <- eval_resid_moran(lm_SLR_prediction , by_time = TRUE , col_time = "date")
 moran_mean_df <- eval_resid_moran(lm_SLR_prediction , by_time = FALSE)
 
 # visualization: mean residuals
@@ -594,3 +617,53 @@ save_plot(
   plot = last_plot() , 
   base_width = 6 , base_height = 4
 )
+
+
+# =====================================
+# export datasets
+# =====================================
+{
+  # export the model summary
+  out_dirpath_lmsummary <- "3_results/output-data/model_daily/SLR_summary"
+  if(!dir.exists(out_dirpath_lmsummary)) dir.create(out_dirpath_lmsummary , recursive = TRUE)
+  lm_SLR %>%
+    broom::tidy() %>%
+    write_csv(sprintf("%s/%s.csv" , out_dirpath_lmsummary , SAT_product))
+  
+  # export the predicted values
+  out_dirpath_predicted <- "3_results/output-data/model_daily/observed-predicted"
+  if(!dir.exists(out_dirpath_predicted)) dir.create(out_dirpath_predicted , recursive = TRUE)
+  lm_SLR_prediction %>% # <-
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_predicted , model_abbr , SAT_product))
+  
+  # export the model performance indices
+  out_dirpath_indices <- "3_results/output-data/model_daily/indices"
+  if(!dir.exists(out_dirpath_indices)) dir.create(out_dirpath_indices , recursive = TRUE)
+  lm_SLR_indices %>% # <- 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_indices , model_abbr , SAT_product))
+  
+  # Moran's I
+  out_dirpath_Moran <- "3_results/output-data/model_daily/Moran"
+  if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran , recursive = TRUE)
+  moran_day_df %>% 
+    pivot_longer(cols = -date) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+  moran_mean_df %>% 
+    pivot_longer(cols = everything()) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/mean_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+}
+
+# =====================================
+# export model
+# =====================================
+{
+  out_dirpath_model <- "3_results/output-model/model_daily"
+  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model , recursive = TRUE)
+  saveRDS(lm_SLR , # <-
+          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+}
+
