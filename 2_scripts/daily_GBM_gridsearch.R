@@ -217,4 +217,58 @@ rm(pb,i)
 out_dirpath_hypergrid <- "3_results/output-data/model_daily/GBM_grid-search"
 if(!dir.exists(out_dirpath_hypergrid)) dir.create(out_dirpath_hypergrid , recursive = TRUE)
 hyper_grid %>%
+  write_csv(sprintf("%s/hyper_evaluation.csv" , out_dirpath_hypergrid))
+
+
+# =====================================
+# more rounds for the outperforming models
+# =====================================
+hyper_grid_advanced <- hyper_grid %>% 
+  arrange(-CV_R2) %>% 
+  dplyr::slice(1:20) %>% 
+  filter(optimal_trees > 900)
+
+# grid search 
+pb <- txtProgressBar(min = 1 , max = nrow(hyper_grid_advanced) , style = 3 )
+for(i in 1:nrow(hyper_grid_advanced)) {
+  # create parameter list
+  hyper_i <- list(
+    eta = hyper_grid_advanced$eta[i],
+    max_depth = hyper_grid_advanced$max_depth[i],
+    min_child_weight = hyper_grid_advanced$min_child_weight[i],
+    subsample = hyper_grid_advanced$subsample[i],
+    colsample_bytree = hyper_grid_advanced$colsample_bytree[i]
+  )
+  # reproducibility
+  set.seed(123)
+  # train model
+  xgb_grid <- xgb.cv(
+    params = hyper_i,
+    data = predictor_full,
+    label = response_full,
+    nrounds = 2000 , 
+    objective = "reg:squarederror" , 
+    folds = CV_folds , 
+    prediction = TRUE , 
+    verbose = FALSE ,  # silent
+    early_stopping_rounds = 10 # stop if no improvement for 10 consecutive trees
+  )
+  # evaluation (add to hyper_grid_advanced data.frame)
+  # the number of iterations with the lowest CV-RMSE
+  hyper_grid_advanced$optimal_trees[i] <- which.min(xgb_grid$evaluation_log$test_rmse_mean)
+  # CV-RMSE
+  hyper_grid_advanced$min_RMSE[i] <- min(xgb_grid$evaluation_log$test_rmse_mean)
+  # CV-R2
+  hyper_grid_advanced$CV_R2[i] <- cor(response_full , xgb_grid$pred)^2
+  # progress bar
+  setTxtProgressBar(pb,i)
+  # clean environment
+  rm(hyper_i , xgb_grid)
+}
+rm(pb,i)
+
+# export grid search results
+hyper_grid %>%
+  bind_rows(hyper_grid_advanced) %>% 
   write_csv(sprintf("%s/hyper_evaluation_full.csv" , out_dirpath_hypergrid))
+
