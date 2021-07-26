@@ -1,8 +1,8 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Annual model: Neural network-- grid search of hyperparameters
-# 2021-06-29
+# Monthly model: Neural network-- grid search of hyperparameters
+# 2021-07-20
 #####################################################################################################
 
 # =====================================
@@ -15,13 +15,14 @@ library(ggplot2) ; library(ggsci) ; library(ggthemes)
 library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
+library(ranger)
 library(keras)
 
 # =====================================
 # load datasets
 # =====================================
 # training data
-data_annual_raw <- read_csv("1_data/processed/cleaned/extracted/annual_scaled.csv")
+data_monthly_raw <- read_csv("1_data/processed/cleaned/extracted/monthly_scaled.csv") 
 
 # cross validation
 {
@@ -34,7 +35,7 @@ data_annual_raw <- read_csv("1_data/processed/cleaned/extracted/annual_scaled.cs
 }
 
 # implement the CV design in the training data
-data_annual_raw <- data_annual_raw %>% 
+data_monthly_raw <- data_monthly_raw %>% 
   inner_join(sites_CV , by = "Station_name") %>% 
   select(-geometry)
 
@@ -47,14 +48,16 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # subset data
 # //////////////////////////////////////////////////////////////////////////
 SAT_product <- "TROPOMI"
+# for now I grid-search the model using TROPOMI and use the same hyperparameter set for OMI
+
 # subset data: satellite-product
 if(SAT_product == "OMI"){
   # for the OMI model: exclude TROPOMI and meteorological variables at 12H
-  data_annual <- data_annual_raw %>% 
+  data_monthly <- data_monthly_raw %>% 
     select(-TROPOMI_NO2 , -ends_with("_12H")) 
 }else if(SAT_product == "TROPOMI"){
   # for the TROPOMI model: exclude OMI and meteorological variables at 15H
-  data_annual <- data_annual_raw %>% 
+  data_monthly <- data_monthly_raw %>% 
     select(-OMI_NO2 , -ends_with("_15H")) 
 }
 
@@ -62,22 +65,47 @@ if(SAT_product == "OMI"){
 # grid search for best model hyperparameters
 # //////////////////////////////////////////////////////////////////////////
 # =====================================
-# create hyperparameter grid
-# =====================================
-hyper_grid <- expand.grid(
-  layers = c(1,2,3,4) ,
-  neurons = c(5,10,15,20,30,50,100) ,
-  epochs = c(30,50) , 
-  batch.size = c(3,5,10,20,30) , 
-  regularization = c(NA , 1 , 2) # 1 for L1 and 2 for L2
-  #regularization_factor = 0.001
-)
-
-# =====================================
 # modularized NN model definition
 # =====================================
 source("2_scripts/utils_define-NN.R")
 
+# =====================================
+# feature selection
+# =====================================
+# Spearman coefficient of correlation
+included_var_cor <- data_monthly %>%
+  select(-all_of(columns_nonpredictor) , NO2) %>%
+  pivot_longer(cols = -NO2) %>%
+  drop_na() %>%
+  group_by(name) %>%
+  summarize(cor = cor(NO2 , value , method = "spearman") ,
+            cor_pearson = cor(NO2 , value , method = "pearson")) %>%
+  ungroup() %>%
+  mutate(cor_abs = abs(cor)) %>%
+  arrange(-cor_abs) %>%
+  filter(cor_abs > 0.1) %>%
+  select(name) %>% unlist %>% unname
+
+# random forest
+included_var_RF <- readRDS(sprintf("3_results/output-model/model_monthly/RF_%s.rds" , SAT_product)) %>%
+  ranger::importance() %>%
+  names()
+
+# no selection
+included_var_all <- colnames(data_monthly)[!colnames(data_monthly) %in% columns_nonpredictor]
+
+# =====================================
+# create hyperparameter grid
+# =====================================
+hyper_grid <- expand.grid(
+  layers = c(1,2,3,4) ,
+  neurons = c(5,10,20,50,100,200) ,
+  epochs = c(25,50) , 
+  batch.size = c(3,5,10,20,100) , 
+  regularization = c(NA , 1 , 2) , # 1 for L1 and 2 for L2
+  regularization_factor = 0.001 ,
+  selection = c(0 , 1 , 2) # 0 for no selection, 1 for cor, 2 for RF
+) 
 
 # =====================================
 # grid search
@@ -88,13 +116,23 @@ for(i in 1:nrow(hyper_grid)){
   hyper_i <- hyper_grid %>% 
     slice(i) %>% 
     unlist
+  # variable selection
+  if(hyper_i["selection"] == 0){
+    included_var <- included_var_all
+  }else if(hyper_i["selection"] == 1){
+    included_var <- included_var_cor
+  }else if(hyper_i["selection"] == 2){
+    included_var <- included_var_RF
+  }
   # =====================================
   # full training set
   # =====================================
-  training.data <- data_annual
+  training.data <- data_monthly %>% 
+    drop_na()
   # make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    # select(-all_of(columns_nonpredictor)) %>%
+    select(one_of(included_var)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
@@ -110,7 +148,7 @@ for(i in 1:nrow(hyper_grid)){
         verbose = FALSE)
   # prediction
   prediction_training <- training.data %>% 
-    select(Station_name , NO2 , Type_of_station , CV) %>% 
+    select(month , Station_name , NO2 , Type_of_station , CV) %>% 
     # prediction
     mutate(predicted = predict(NN , predictor_train)[,1])
   # clean environment
@@ -120,19 +158,23 @@ for(i in 1:nrow(hyper_grid)){
   # =====================================
   for(k in as.factor(1:k_fold)){
     # data preparation: partition
-    training.data <- data_annual %>% 
-      filter(CV != k)
-    testing.data <- data_annual %>% 
-      filter(CV == k)
+    training.data <- data_monthly %>% 
+      filter(CV != k) %>% 
+      drop_na()
+    testing.data <- data_monthly %>% 
+      filter(CV == k) %>% 
+      drop_na()
     # data preparation: make matrix
     predictor_train <- training.data %>% 
-      select(-all_of(columns_nonpredictor)) %>% 
+      # select(-all_of(columns_nonpredictor)) %>% 
+      select(all_of(included_var)) %>% 
       as.matrix()
     response_train <- training.data %>% 
       select(NO2) %>% 
       as.matrix()
     predictor_test <- testing.data %>% 
-      select(-all_of(columns_nonpredictor)) %>% 
+      # select(-all_of(columns_nonpredictor)) %>% 
+      select(all_of(included_var)) %>% 
       as.matrix()
     response_test <- testing.data %>% 
       select(NO2) %>% 
@@ -148,7 +190,7 @@ for(i in 1:nrow(hyper_grid)){
           verbose = FALSE)
     # prediction
     prediction_test <- testing.data %>% 
-      select(Station_name , NO2 , Type_of_station , CV) %>% 
+      select(month , Station_name , NO2 , Type_of_station , CV) %>% 
       # prediction
       mutate(predicted = predict(NN , predictor_test)[,1])
     # prediction data.frame
@@ -158,7 +200,9 @@ for(i in 1:nrow(hyper_grid)){
       prediction_CV <- bind_rows(prediction_CV , prediction_test)
     }
     # clean environment
-    rm(k , training.data , testing.data , predictor_train , predictor_test , response_train , response_test , prediction_test)
+    rm(k , training.data , testing.data , 
+       predictor_train , predictor_test , response_train , response_test , 
+       prediction_test)
   }
   # =====================================
   # evaluate
@@ -168,7 +212,7 @@ for(i in 1:nrow(hyper_grid)){
       bind_cols(
         prediction_training %>% 
           full_join(prediction_CV , 
-                    by = c("Station_name" , "NO2" , "Type_of_station" , "CV") , 
+                    by = c("Station_name" , "NO2" , "Type_of_station" , "CV" , "month") , 
                     suffix = c("" , "_CV")) %>% 
           # calculate the indices from the observed and predicted values 
           summarize(MSE_training = mse(NO2 , predicted) , 
@@ -185,7 +229,7 @@ for(i in 1:nrow(hyper_grid)){
           bind_cols(
             prediction_training %>% 
               full_join(prediction_CV , 
-                        by = c("Station_name" , "NO2" , "Type_of_station" , "CV") , 
+                        by = c("Station_name" , "NO2" , "Type_of_station" , "CV" , "month") , 
                         suffix = c("" , "_CV")) %>% 
               # calculate the indices from the observed and predicted values 
               summarize(MSE_training = mse(NO2 , predicted) , 
@@ -200,14 +244,14 @@ for(i in 1:nrow(hyper_grid)){
   # progress bar
   setTxtProgressBar(pb,i)
   # clean environment
-  rm(hyper_i , NN , prediction_training , prediction_CV)
+  rm(hyper_i , included_var , NN , prediction_training , prediction_CV)
 }
 rm(pb,i)
 
 # =====================================
 # export grid search results
 # =====================================
-out_dirpath_grid_search <- "3_results/output-data/model_annual/NN_grid-search"
+out_dirpath_grid_search <- "3_results/output-data/model_monthly/NN_grid-search"
 if(!dir.exists(out_dirpath_grid_search)) dir.create(out_dirpath_grid_search)
 hyper_evaluation %>% 
   write_csv(sprintf("%s/hyper_evaluation.csv" , out_dirpath_grid_search))
@@ -361,7 +405,7 @@ hyper_evaluation %>%
   theme_bw() +
   theme(axis.text.x = element_text(angle = 90 , vjust = 0.5 , hjust = 1) , 
         strip.text.x = element_text(size = 8))
-  
+
 # =====================================
 # see the effect of batch sizes
 # =====================================
