@@ -1,6 +1,6 @@
 {
   "R": {
-    "Version": "3.6.3",
+    "Version": "4.0.3",
     "Repositories": [
       {
         "Name": "CRAN",
@@ -135,13 +135,6 @@
       "Repository": "CRAN",
       "Hash": "e031418365a7f7a766181ab5a41a5716"
     },
-    "RNetCDF": {
-      "Package": "RNetCDF",
-      "Version": "2.4-2",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "f239d1814b2d647a5bc22da8831f5621"
-    },
     "RStoolbox": {
       "Package": "RStoolbox",
       "Version": "0.2.6",
@@ -151,10 +144,10 @@
     },
     "Rcpp": {
       "Package": "Rcpp",
-      "Version": "1.0.6",
+      "Version": "1.0.7",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "dbb5e436998a7eba5a9d682060533338"
+      "Hash": "dab19adae4440ae55aa8a9d238b246bb"
     },
     "RcppArmadillo": {
       "Package": "RcppArmadillo",
@@ -834,7 +827,7 @@
       "RemoteUsername": "rstudio",
       "RemoteRef": "HEAD",
       "RemoteSha": "67b3f185315b49644ef6bd7ef26b14aafb2c3bea",
-      "Hash": "cac8a851caa313437a992451455b571b"
+      "Hash": "f8f1daea6f807d686f686876812cdd45"
     },
     "knitr": {
       "Package": "knitr",
@@ -1038,13 +1031,6 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "5c1c0231b12b3d54cf619a3e5e36d229"
-    },
-    "ncmeta": {
-      "Package": "ncmeta",
-      "Version": "0.3.0",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "01619645794f6fcaf023d5fa27f39f14"
     },
     "nlme": {
       "Package": "nlme",
@@ -1526,13 +1512,6 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "349b40a9f144516d537c875e786ec8b8"
-    },
-    "tidync": {
-      "Package": "tidync",
-      "Version": "0.2.4",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "37cd3b8c6b1071f3377268f03fd9113b"
     },
     "tidyr": {
       "Package": "tidyr",
