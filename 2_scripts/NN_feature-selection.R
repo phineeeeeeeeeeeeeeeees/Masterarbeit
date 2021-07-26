@@ -66,13 +66,15 @@ if(SAT_product == "OMI"){
 # define model 
 # //////////////////////////////////////////////////////////////////////////
 source("2_scripts/utils_define-NN.R")
+
 # benchmark hyperparameter
-hyperparm_benchmark <- c("layers" = 3 , 
-                         "neurons" = 10 ,
+hyperparm_benchmark <- c("layers" = 1 , 
+                         "neurons" = 100 , 
                          "epochs" = 50 , 
                          "batch.size" = 100 , 
                          "regularization" = NA , 
-                         "regularization_factor" = NA)
+                         "regularization_factor" = NA , 
+                         "dropout_rate" = 0.1)
 
 # //////////////////////////////////////////////////////////////////////////
 # different feature selection methods 
@@ -791,8 +793,8 @@ NN_nnet <- nnet(
   size = 20 , linout = TRUE , MaxNWts = 1e4
 )
 
-cor(NN_nnet$fitted.values , response_train)^2
-mae(NN_nnet$fitted.values , response_train)
+# cor(NN_nnet$fitted.values , response_train)^2
+# mae(NN_nnet$fitted.values , response_train)
 
 # the functoin for determing relative importance
 NN_nnet_varimp <- NeuralNetTools::garson(NN_nnet , bar_plot = FALSE) %>% 

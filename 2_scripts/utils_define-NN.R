@@ -1,7 +1,8 @@
 library(keras)
 
 NN_define <- function(hyperparm_vector , n_var){
-  # | hyperparm_vector: a named vector with the hyperparameters (layers, neurons, epochs, batch.size)
+  # | hyperparm_vector: a named vector with the hyperparameters 
+  # | | layers, neurons, epochs, batch.size , regularization, regularization_factor, dropout_rate
   # | n_var: number of input variables (for the input layer); ncol(predictor_matrix)
   # define model 
   NN <<- keras_model_sequential()
@@ -19,6 +20,7 @@ NN_define <- function(hyperparm_vector , n_var){
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   input_shape = n_var , 
                   kernel_regularizer = NN_regularizer) %>% 
+      layer_dropout(rate = hyperparm_vector["dropout_rate"]) %>% 
       layer_dense(units = 1 , activation = "linear")
   }
   if(hyperparm_vector["layers"] == 2){
@@ -26,6 +28,7 @@ NN_define <- function(hyperparm_vector , n_var){
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   input_shape = n_var , 
                   kernel_regularizer = NN_regularizer) %>% 
+      layer_dropout(rate = hyperparm_vector["dropout_rate"]) %>% 
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   kernel_regularizer = NN_regularizer) %>% 
       layer_dense(units = 1 , activation = "linear")
@@ -35,6 +38,7 @@ NN_define <- function(hyperparm_vector , n_var){
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   input_shape = n_var , 
                   kernel_regularizer = NN_regularizer) %>% 
+      layer_dropout(rate = hyperparm_vector["dropout_rate"]) %>% 
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   kernel_regularizer = NN_regularizer) %>% 
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
@@ -46,6 +50,7 @@ NN_define <- function(hyperparm_vector , n_var){
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   input_shape = n_var , 
                   kernel_regularizer = NN_regularizer) %>% 
+      layer_dropout(rate = hyperparm_vector["dropout_rate"]) %>% 
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
                   kernel_regularizer = NN_regularizer) %>% 
       layer_dense(units = hyperparm_vector["neurons"] , activation = "relu" , 
