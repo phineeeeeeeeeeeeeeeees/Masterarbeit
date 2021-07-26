@@ -17,6 +17,7 @@ library(spdep)
 library(Metrics)
 library(ranger)
 library(keras)
+library(nnet) ; library(NeuralNetTools)
 
 # =====================================
 # load datasets
@@ -72,27 +73,51 @@ source("2_scripts/utils_define-NN.R")
 # =====================================
 # feature selection
 # =====================================
-# Spearman coefficient of correlation
-included_var_cor <- data_monthly %>%
-  select(-all_of(columns_nonpredictor) , NO2) %>%
-  pivot_longer(cols = -NO2) %>%
-  drop_na() %>%
-  group_by(name) %>%
-  summarize(cor = cor(NO2 , value , method = "spearman") ,
-            cor_pearson = cor(NO2 , value , method = "pearson")) %>%
-  ungroup() %>%
-  mutate(cor_abs = abs(cor)) %>%
-  arrange(-cor_abs) %>%
-  filter(cor_abs > 0.1) %>%
-  select(name) %>% unlist %>% unname
+# single-hidden-layer neural network for screening
+set.seed(20210727)
+NN_screen <- nnet(
+  x = data_monthly %>% 
+    drop_na() %>% 
+    select(-all_of(columns_nonpredictor)) %>% 
+    # random-value variables
+    mutate(R1 = runif(n()) , 
+           R2 = runif(n()) ,
+           R3 = runif(n()) ) , 
+  y = data_monthly %>% 
+    drop_na() %>% 
+    select(NO2) , 
+  size = 20 , linout = TRUE , MaxNWts = 1e4
+)
 
-# random forest
-included_var_RF <- readRDS(sprintf("3_results/output-model/model_monthly/RF_%s.rds" , SAT_product)) %>%
-  ranger::importance() %>%
-  names()
+# variables importance using Garson's algorithm
+NN_screen_importance <- NeuralNetTools::garson(NN_screen , bar_plot = FALSE) %>% 
+  tibble(variables = row.names(.))
+NN_screen_importance %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # random 
+  mutate(class = ifelse(str_detect(variables , "R[123]") , "Random" , "Predictor variables")) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp , fill = class)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_lancet() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Screening of relevant predictor variables" , 
+       subtitle = "Relative importance of input variables in neural networks\n using Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 6) , legend.position = "bottom")
 
-# no selection
-included_var_all <- colnames(data_monthly)[!colnames(data_monthly) %in% columns_nonpredictor]
+# variable selection
+included_var <- NN_nnet_varimp %>% 
+  filter(rel_imp > NN_nnet_varimp %>% 
+           filter(str_detect(variables , "R[123]")) %>% 
+           # the max importance of the random-value variables 
+           summarize(rel_imp = max(rel_imp)) %>% 
+           unlist) %>% 
+  select(variables) %>% 
+  filter(!str_detect(variables , "R[123]")) %>% 
+  unlist %>% unname
 
 # =====================================
 # create hyperparameter grid
@@ -103,9 +128,8 @@ hyper_grid <- expand.grid(
   epochs = c(25,50) , 
   batch.size = c(3,5,10,20,100) , 
   regularization = c(NA , 1 , 2) , # 1 for L1 and 2 for L2
-  regularization_factor = 0.001 ,
-  selection = c(0 , 1 , 2) # 0 for no selection, 1 for cor, 2 for RF
-) 
+  regularization_factor = 0.001
+  ) 
 
 # =====================================
 # grid search
@@ -116,14 +140,6 @@ for(i in 1:nrow(hyper_grid)){
   hyper_i <- hyper_grid %>% 
     slice(i) %>% 
     unlist
-  # variable selection
-  if(hyper_i["selection"] == 0){
-    included_var <- included_var_all
-  }else if(hyper_i["selection"] == 1){
-    included_var <- included_var_cor
-  }else if(hyper_i["selection"] == 2){
-    included_var <- included_var_RF
-  }
   # =====================================
   # full training set
   # =====================================
