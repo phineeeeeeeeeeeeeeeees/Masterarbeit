@@ -105,13 +105,18 @@ NN_screen_importance %>%
   scale_fill_lancet() +
   labs(x = "Variables" , y = "Variable importance" , 
        title = "Screening of relevant predictor variables" , 
-       subtitle = "Relative importance of input variables in neural networks\n using Garson's algorithm") +
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
   theme_bw() +
-  theme(axis.text.y = element_text(size = 6) , legend.position = "bottom")
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+cowplot::save_plot(
+  "3_results/output-data/model_monthly/NN_grid-search/garson_screening.png" , 
+  plot = last_plot() ,
+  base_width = 6 , base_height = 10
+)
 
 # variable selection
-included_var_garson <- NN_nnet_varimp %>% 
-  filter(rel_imp > NN_nnet_varimp %>% 
+included_var_garson <- NN_screen_importance %>% 
+  filter(rel_imp > NN_screen_importance %>% 
            filter(str_detect(variables , "R[123]")) %>% 
            # the max importance of the random-value variables 
            summarize(rel_imp = max(rel_imp)) %>% 
@@ -267,7 +272,6 @@ search_hyper_grid <- function(df){
 }
 # grid search
 hyper_evaluation <- hyper_grid %>% 
-  head(2) %>% 
   pbapply(MARGIN = 1 , FUN = search_hyper_grid , cl = cl) %>% 
   bind_rows()
 
