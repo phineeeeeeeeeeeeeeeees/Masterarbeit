@@ -347,10 +347,7 @@ moran_mean_df <- eval_resid_moran(rf_final_prediction %>% drop_na() ,
                                   by_time = FALSE)
 # visualization
 plot_resid_map(rf_final_prediction %>% drop_na() , # <-
-               sprintf("%s (%s)" , str_to_title(model_name) , SAT_product)) +
-  scale_color_gradient2(low = "dodgerblue3" , mid = "white" , high = "deeppink3" , 
-                        #oob = scales::squish , 
-                        limits = c(-5,5))
+               sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
 save_plot(
   sprintf("%s/residual-map_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = last_plot() , 

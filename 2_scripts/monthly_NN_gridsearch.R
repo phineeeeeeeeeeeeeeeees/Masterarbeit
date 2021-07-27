@@ -93,7 +93,7 @@ NN_screen <- nnet(
 # variables importance using Garson's algorithm
 NN_screen_importance <- NeuralNetTools::garson(NN_screen , bar_plot = FALSE) %>% 
   tibble(variables = row.names(.))
-NN_screen_importance %>% 
+screen_plot <- NN_screen_importance %>% 
   # re-order for visualization
   mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
   # random 
@@ -108,11 +108,6 @@ NN_screen_importance %>%
        subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
   theme_bw() +
   theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
-cowplot::save_plot(
-  "3_results/output-data/model_monthly/NN_grid-search/garson_screening.png" , 
-  plot = last_plot() ,
-  base_width = 6 , base_height = 10
-)
 
 # variable selection
 included_var_garson <- NN_screen_importance %>% 
@@ -154,8 +149,8 @@ clusterExport(
   varlist = c("data_monthly" , "k_fold" , "included_var_all" , "included_var_garson" , "NN_define")
 )
 # grid search function for "apply"
-search_hyper_grid <- function(df){
-  # df is the hyperparameter (one row of "hyper_grid")
+search_hyper_grid <- function(hyper_grid_row){
+  # hyper_grid_row is the hyperparameter (one row of "hyper_grid")
   # load packages for the clusters
   library(dplyr) ; library(tidyr) ; 
   library(keras)
@@ -163,9 +158,9 @@ search_hyper_grid <- function(df){
   # =====================================
   # feature selection
   # =====================================
-  if(is.na(df["garson_selection"])){
+  if(is.na(hyper_grid_row["garson_selection"])){
     included_var <- included_var_all
-  }else if(df["garson_selection"] == 1){
+  }else if(hyper_grid_row["garson_selection"] == 1){
     included_var <- included_var_garson
   }
   # =====================================
@@ -182,12 +177,12 @@ search_hyper_grid <- function(df){
     select(NO2) %>% 
     as.matrix()
   # define model
-  NN_define(df , n_var = ncol(predictor_train))
+  NN_define(hyper_grid_row , n_var = ncol(predictor_train))
   # train model
   NN %>% 
     fit(predictor_train , response_train , 
-        epoch = df["epochs"] , 
-        batch_size = df["batch.size"] , 
+        epoch = hyper_grid_row["epochs"] , 
+        batch_size = hyper_grid_row["batch.size"] , 
         validation_split = 0.2 , 
         verbose = FALSE)
   # prediction
@@ -224,12 +219,12 @@ search_hyper_grid <- function(df){
       select(NO2) %>% 
       as.matrix()
     # define model
-    NN_define(df , n_var = ncol(predictor_train))
+    NN_define(hyper_grid_row , n_var = ncol(predictor_train))
     # train model
     NN %>% 
       fit(predictor_train , response_train , 
-          epoch = df["epochs"] , 
-          batch_size = df["batch.size"] , 
+          epoch = hyper_grid_row["epochs"] , 
+          batch_size = hyper_grid_row["batch.size"] , 
           validation_split = 0.2 , 
           verbose = FALSE)
     # prediction
@@ -251,7 +246,7 @@ search_hyper_grid <- function(df){
   # =====================================
   # evaluate
   # =====================================
-  hyper_evaluation_i <- df %>% 
+  hyper_evaluation_i <- hyper_grid_row %>% 
     as.list() %>% as_tibble() %>% 
     bind_cols(
       prediction_training %>% 
@@ -424,7 +419,11 @@ if(!dir.exists(out_dirpath_grid_search)) dir.create(out_dirpath_grid_search)
 hyper_evaluation %>% 
   write_csv(sprintf("%s/hyper_evaluation.csv" , out_dirpath_grid_search))
 
-
+cowplot::save_plot(
+  sprintf("%s/garson_screening.png" , out_dirpath_grid_search) , 
+  plot = screen_plot ,
+  base_width = 6 , base_height = 10
+)
 
 # //////////////////////////////////////////////////////////////////////////
 # evaluate the grid search result
