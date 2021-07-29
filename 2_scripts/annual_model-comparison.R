@@ -16,23 +16,40 @@ library(lubridate) ; library(stringr)
 # =====================================
 # load data
 # =====================================
+# model performance indices 
 in_filepath_indices <- list.files("3_results/output-data/model_annual/indices" , pattern = ".csv$" , full.names = TRUE)
-model_indices <- lapply(in_filepath_indices , read_csv) %>% 
+model_indices <- in_filepath_indices %>% 
+  lapply(read_csv) %>% 
   bind_rows()
-model_moran <- lapply(list.files("3_results/output-data/model_annual/moran" , pattern = ".csv$" , full.names = TRUE) , 
-                      read_csv) %>% 
+# model observed versus predicted values
+model_prediction <- list.files("3_results/output-data/model_annual/observed-predicted" , pattern = ".csv$" , full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
+  bind_rows()
+# model residual Moran's I
+model_moran <- list.files("3_results/output-data/model_annual/moran" , pattern = ".csv$" , full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
   bind_rows()
 
+# distance from the monitoring sites to the nearest road
+sites_road <- read_csv("1_data/processed/cleaned/extracted/site-road-distance.csv")
+
 # =====================================
+# model performance indices
 # tidy table for presentation and paper
 # =====================================
+model_indices %>% 
+  select(value , min , max) %>% 
+  # round values
+  mutate(across(c(value , min , max) , round , 3)) %>%
+  glue::glue_data("{value} ({min}~{max})" , .trim = TRUE)
+
 model_compare_tidy <- model_indices %>% 
   # round values
   mutate(across(c(value , min , max) , round , 3)) %>% 
   # value format: with ranges
-  mutate(value = ifelse(if_any(c(min,max) , is.na) , 
-                        value , 
-                        sprintf("%s (%s~%s)" , value , min , max))) %>% 
+  mutate(across(c(value , min , max) , format , trim = TRUE , digits = 3)) %>% 
+  mutate(value = glue::glue_data(. , "{value} ({min}~{max})") %>% 
+           str_remove_all("\\(NA~NA\\)") %>% str_trim()) %>% 
   # re-order columns
   select(model , product , type , name , value) %>% 
   pivot_wider(names_from = c(type , name) , names_sep = "_" , values_from = value) %>% 
@@ -43,42 +60,62 @@ model_compare_tidy <- model_indices %>%
   # re-order columns
   select(model , product , 
          training_R2 , training_RMSE , training_slope , training_intercept , 
-         CV_R2 , CV_RMSE , CV_slope , CV_intercept) %>% 
+         CV_R2 , CV_RMSE , CV_slope , CV_intercept , 
+         spatialCV_R2 , spatialCV_RMSE , spatialCV_slope , spatialCV_intercept) %>% 
   # Moran's I
   left_join(
     model_moran %>% 
       pivot_wider(names_from = name , values_from = value) %>% 
-      rename(MoransI = `Moran I statistic` , 
+      rename(MoransI = Moran_I_statistic , 
              MoransI.p = p) %>% 
       select(-Expectation , -Variance) , 
     by = c("model" , "product")
-  )
+  ) %>% 
+  # round values (Morans's I)
+  mutate(across(starts_with("MoransI") , round , 3))
 
-
+# export the tidy table
 model_compare_tidy %>% 
   write_csv("3_results/output-data/model_annual/model_annual_indices.csv")
-# =====================================
-# visualization and comparison
-# =====================================
-model_indices %>% 
-  filter(name %in% c("R2" , "RMSE")) %>% 
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF"))) %>% 
-  ggplot(aes(x = model , y = value , fill = type)) +
-  geom_bar( stat = "identity" , position = position_dodge(width = 0.9)) +
-  geom_pointrange(aes(ymin = min , ymax = max) , 
-                  size = 0.3 , position = position_dodge(width = 0.9)) +
-  facet_grid(name~product , scales = "free_y") +
-  scale_fill_jco(labels = c("5-fold CV" , "without CV") , name = "") +
-  labs(title = "Model performance indices") +
-  theme_bw()
+# tidy table with R2, RMSE, Moran's I
+model_compare_tidy %>% 
+  select(model , product , 
+         training_R2 , training_RMSE , 
+         CV_R2 , CV_RMSE , 
+         spatialCV_R2 , spatialCV_RMSE , starts_with("MoransI")) %>% 
+  write_csv("3_results/output-data/model_annual/model_annual_indices_1.csv")
+# tidy table with slope and intercept
+model_compare_tidy %>% 
+  select(model , product , 
+         training_slope , training_intercept , 
+         CV_slope , CV_intercept , 
+         spatialCV_slope , spatialCV_intercept) %>% 
+  write_csv("3_results/output-data/model_annual/model_annual_indices_2.csv")
 
-model_indices %>% 
-  filter(name %in% c("intercept" , "slope")) %>% 
-  ggplot(aes(x = model , y = value , fill = type)) +
-  geom_crossbar(aes(ymin = min , ymax = max) , 
-                position = position_dodge(width = 0.9)) +
-  facet_grid(name~product , scales = "free_y") +
-  scale_fill_jco(labels = c("10-fold CV" , "without CV") , name = "") +
-  labs(title = "Observed versus predicted") +
+# =====================================
+# residual diagnostics
+# residual <-> distance to nearest roads
+# =====================================
+model_prediction_road <- model_prediction %>% 
+  # distance to nearest roads
+  left_join(
+    sites_road %>% 
+      select(Station_name , starts_with("dist_") , starts_with("DTV")), 
+    by = "Station_name"
+  )
+
+model_prediction_road %>% 
+  # re-order for visualization
+  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
+         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
+  # visualization
+  ggplot(aes(x = dist_nearest_mainroad_bysite , y = residual_CV)) +
+  geom_point(shape = 1) +
+  geom_smooth() +
+  scale_x_log10() +
+  facet_wrap(~model + product) +
+  labs(title = "The distance from the monitoring sites to the nearest major road" , 
+       subtitle = "Annual models" ,
+       x = "meter" ,  y = "Cross-validation residual") +
   theme_bw()
 
