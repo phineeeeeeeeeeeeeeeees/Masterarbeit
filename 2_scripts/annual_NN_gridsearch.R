@@ -16,6 +16,8 @@ library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
 library(keras)
+library(nnet) ; library(NeuralNetTools)
+library(parallel) ; library(pbapply)
 
 # =====================================
 # load datasets
@@ -62,50 +64,124 @@ if(SAT_product == "OMI"){
 # grid search for best model hyperparameters
 # //////////////////////////////////////////////////////////////////////////
 # =====================================
-# create hyperparameter grid
-# =====================================
-hyper_grid <- expand.grid(
-  layers = c(1,2,3,4) ,
-  neurons = c(5,10,15,20,30,50,100) ,
-  epochs = c(30,50) , 
-  batch.size = c(3,5,10,20,30) , 
-  regularization = c(NA , 1 , 2) # 1 for L1 and 2 for L2
-  #regularization_factor = 0.001
-)
-
-# =====================================
 # modularized NN model definition
 # =====================================
 source("2_scripts/utils_define-NN.R")
 
+# =====================================
+# feature selection
+# =====================================
+# single-hidden-layer neural network for screening
+set.seed(20210727)
+NN_screen <- nnet(
+  x = data_annual %>% 
+    drop_na() %>% 
+    select(-all_of(columns_nonpredictor)) %>% 
+    # random-value variables
+    mutate(R1 = runif(n()) , 
+           R2 = runif(n()) ,
+           R3 = runif(n()) ) , 
+  y = data_annual %>% 
+    drop_na() %>% 
+    select(NO2) , 
+  size = 10 , linout = TRUE , MaxNWts = 1e4
+)
+
+# variables importance using Garson's algorithm
+NN_screen_importance <- NeuralNetTools::garson(NN_screen , bar_plot = FALSE) %>% 
+  tibble(variables = row.names(.))
+screen_plot <- NN_screen_importance %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # random 
+  mutate(class = ifelse(str_detect(variables , "R[123]") , "Random" , "Predictor variables")) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp , fill = class)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_lancet() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Screening of relevant predictor variables" , 
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+screen_plot
+
+# variable selection
+included_var_garson <- NN_screen_importance %>% 
+  filter(rel_imp > NN_screen_importance %>% 
+           filter(str_detect(variables , "R[123]")) %>% 
+           # the max importance of the random-value variables 
+           summarize(rel_imp = max(rel_imp)) %>% 
+           unlist) %>% 
+  select(variables) %>% 
+  filter(!str_detect(variables , "R[123]")) %>% 
+  unlist %>% unname
+# no selection
+included_var_all <- colnames(data_annual)[!colnames(data_annual) %in% columns_nonpredictor]
+
+# =====================================
+# create hyperparameter grid
+# =====================================
+hyper_grid <- expand.grid(
+  layers = c(1,2,3,4) ,
+  neurons = c(5,10,20,30,50,100) ,
+  epochs = c(25,50) , 
+  batch.size = c(3,5,10,20) , 
+  regularization = c(NA , 1 , 2) , # 1 for L1 and 2 for L2
+  regularization_factor = 0.001 , 
+  garson_selection = c(NA,1) , # NA for no selection; 1 for selection using Garson importance
+  dropout_rate = c(0 , 0.1 , 0.2)
+)
 
 # =====================================
 # grid search
 # =====================================
-pb <- txtProgressBar(min = 1 , max = nrow(hyper_grid) , style = 3 )
-for(i in 1:nrow(hyper_grid)){
-  # hyperparameters
-  hyper_i <- hyper_grid %>% 
-    slice(i) %>% 
-    unlist
+# parallel computation
+cpu.cores <- detectCores()
+cl <- makeCluster(cpu.cores)
+# clusterExport
+# 在使用預設PSOCK cluster時，若想要讓所有的節點可以使用預先設定好的全域變數，必須以clusterExport將變數傳遞至所有節點，之後才能在各個節點中使用
+clusterExport(
+  cl = cl , 
+  varlist = c("data_annual" , "k_fold" , "included_var_all" , "included_var_garson" , "NN_define")
+)
+# grid search function for "apply"
+search_hyper_grid <- function(hyper_grid_row){
+  # hyper_grid_row is the hyperparameter (one row of "hyper_grid")
+  # load packages for the clusters
+  library(dplyr) ; library(tidyr) ; 
+  library(keras) ; library(tensorflow)
+  library(Metrics)
+  # =====================================
+  # feature selection
+  # =====================================
+  if(is.na(hyper_grid_row["garson_selection"])){
+    included_var <- included_var_all
+  }else if(hyper_grid_row["garson_selection"] == 1){
+    included_var <- included_var_garson
+  }
   # =====================================
   # full training set
   # =====================================
-  training.data <- data_annual
+  training.data <- data_annual %>% 
+    drop_na()
   # make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    # select(-all_of(columns_nonpredictor)) %>%
+    select(one_of(included_var)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
-  NN_define(hyper_i , n_var = ncol(predictor_train))
+  set_random_seed(1010) # reproducibility for Keras
+  NN_define(hyper_grid_row , n_var = ncol(predictor_train))
   # train model
   NN %>% 
     fit(predictor_train , response_train , 
-        epoch = hyper_i["epochs"] , 
-        batch_size = hyper_i["batch.size"] , 
+        epoch = hyper_grid_row["epochs"] , 
+        batch_size = hyper_grid_row["batch.size"] , 
         validation_split = 0.2 , 
         verbose = FALSE)
   # prediction
@@ -113,37 +189,42 @@ for(i in 1:nrow(hyper_grid)){
     select(Station_name , NO2 , Type_of_station , CV) %>% 
     # prediction
     mutate(predicted = predict(NN , predictor_train)[,1])
-  # clean environment
-  rm(training.data , predictor_train , response_train , NN)
+  # # clean environment
+  # rm(training.data , predictor_train , response_train , NN)
   # =====================================
   # cross validation
   # =====================================
   for(k in as.factor(1:k_fold)){
     # data preparation: partition
     training.data <- data_annual %>% 
-      filter(CV != k)
+      filter(CV != k) %>% 
+      drop_na()
     testing.data <- data_annual %>% 
-      filter(CV == k)
+      filter(CV == k) %>% 
+      drop_na()
     # data preparation: make matrix
     predictor_train <- training.data %>% 
-      select(-all_of(columns_nonpredictor)) %>% 
+      # select(-all_of(columns_nonpredictor)) %>% 
+      select(all_of(included_var)) %>% 
       as.matrix()
     response_train <- training.data %>% 
       select(NO2) %>% 
       as.matrix()
     predictor_test <- testing.data %>% 
-      select(-all_of(columns_nonpredictor)) %>% 
+      # select(-all_of(columns_nonpredictor)) %>% 
+      select(all_of(included_var)) %>% 
       as.matrix()
     response_test <- testing.data %>% 
       select(NO2) %>% 
       as.matrix()
     # define model
-    NN_define(hyper_i , n_var = ncol(predictor_train))
+    set_random_seed(1010) # reproducibility for Keras
+    NN_define(hyper_grid_row , n_var = ncol(predictor_train))
     # train model
     NN %>% 
       fit(predictor_train , response_train , 
-          epoch = hyper_i["epochs"] , 
-          batch_size = hyper_i["batch.size"] , 
+          epoch = hyper_grid_row["epochs"] , 
+          batch_size = hyper_grid_row["batch.size"] , 
           validation_split = 0.2 , 
           verbose = FALSE)
     # prediction
@@ -158,51 +239,40 @@ for(i in 1:nrow(hyper_grid)){
       prediction_CV <- bind_rows(prediction_CV , prediction_test)
     }
     # clean environment
-    rm(k , training.data , testing.data , predictor_train , predictor_test , response_train , response_test , prediction_test)
+    rm(k , training.data , testing.data , 
+       predictor_train , predictor_test , response_train , response_test , 
+       prediction_test)
   }
   # =====================================
   # evaluate
   # =====================================
-  if(i == 1){ # hyper_evaluation as the output of the grid search
-    hyper_evaluation <- hyper_i %>% as.list() %>% as_tibble() %>% 
-      bind_cols(
-        prediction_training %>% 
-          full_join(prediction_CV , 
-                    by = c("Station_name" , "NO2" , "Type_of_station" , "CV") , 
-                    suffix = c("" , "_CV")) %>% 
-          # calculate the indices from the observed and predicted values 
-          summarize(MSE_training = mse(NO2 , predicted) , 
-                    MSE_CV = mse(NO2 , predicted_CV) , 
-                    MAE_training = mae(NO2 , predicted) ,
-                    MAE_CV = mae(NO2 , predicted_CV) ,
-                    R2_training = cor(NO2 , predicted)^2 ,
-                    R2_CV = cor(NO2 , predicted_CV)^2 )
-      )
-  }else{ # append
-    hyper_evaluation <- hyper_evaluation %>% 
-      bind_rows(
-        hyper_i %>% as.list() %>% as_tibble() %>% 
-          bind_cols(
-            prediction_training %>% 
-              full_join(prediction_CV , 
-                        by = c("Station_name" , "NO2" , "Type_of_station" , "CV") , 
-                        suffix = c("" , "_CV")) %>% 
-              # calculate the indices from the observed and predicted values 
-              summarize(MSE_training = mse(NO2 , predicted) , 
-                        MSE_CV = mse(NO2 , predicted_CV) , 
-                        MAE_training = mae(NO2 , predicted) ,
-                        MAE_CV = mae(NO2 , predicted_CV) ,
-                        R2_training = cor(NO2 , predicted)^2 ,
-                        R2_CV = cor(NO2 , predicted_CV)^2 )
-          )
-      )
-  }
-  # progress bar
-  setTxtProgressBar(pb,i)
-  # clean environment
-  rm(hyper_i , NN , prediction_training , prediction_CV)
+  hyper_evaluation_i <- hyper_grid_row %>% 
+    as.list() %>% as_tibble() %>% 
+    bind_cols(
+      prediction_training %>% 
+        full_join(prediction_CV , 
+                  by = c("Station_name" , "NO2" , "Type_of_station" , "CV") , 
+                  suffix = c("" , "_CV")) %>% 
+        # calculate the indices from the observed and predicted values 
+        summarize(MSE_training = mse(NO2 , predicted) , 
+                  MSE_CV = mse(NO2 , predicted_CV) , 
+                  MAE_training = mae(NO2 , predicted) ,
+                  MAE_CV = mae(NO2 , predicted_CV) ,
+                  R2_training = cor(NO2 , predicted)^2 ,
+                  R2_CV = cor(NO2 , predicted_CV)^2 )
+    )
+  
+  # function return
+  return(hyper_evaluation_i)
 }
-rm(pb,i)
+# grid search
+hyper_evaluation <- hyper_grid %>% 
+  pbapply(MARGIN = 1 , FUN = search_hyper_grid , cl = cl) %>% 
+  bind_rows()
+
+# turn off cluster
+stopCluster(cl)
+
 
 # =====================================
 # export grid search results
@@ -212,6 +282,11 @@ if(!dir.exists(out_dirpath_grid_search)) dir.create(out_dirpath_grid_search)
 hyper_evaluation %>% 
   write_csv(sprintf("%s/hyper_evaluation.csv" , out_dirpath_grid_search))
 
+cowplot::save_plot(
+  sprintf("%s/garson_screening.png" , out_dirpath_grid_search) , 
+  plot = screen_plot ,
+  base_width = 6 , base_height = 10
+)
 
 
 # //////////////////////////////////////////////////////////////////////////
@@ -223,7 +298,7 @@ hyper_evaluation %>%
 hyper_evaluation %>% 
   arrange(-R2_CV) 
 hyper_evaluation %>% 
-  arrange(MAE_CV)
+  arrange(MAE_CV) 
 
 # =====================================
 # see the effect of neurons, layers, regularizations

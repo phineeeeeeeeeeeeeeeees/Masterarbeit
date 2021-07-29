@@ -1,7 +1,7 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Annual model: Neural network-- grid search of hyperparameters
+# Monthly model: Neural network
 # 2021-06-29
 #####################################################################################################
 
@@ -16,6 +16,7 @@ library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
 library(keras)
+library(nnet) ; library(NeuralNetTools)
 
 source("2_scripts/utils_model-eval.R")
 
@@ -81,16 +82,66 @@ if(SAT_product == "OMI"){
 source("2_scripts/utils_define-NN.R")
 
 # =====================================
+# feature selection
+# =====================================
+# single-hidden-layer neural network for screening
+set.seed(20210727)
+NN_screen <- nnet(
+  x = data_monthly %>% 
+    drop_na() %>% 
+    select(-all_of(columns_nonpredictor)) %>% 
+    # random-value variables
+    mutate(R1 = runif(n()) , 
+           R2 = runif(n()) ,
+           R3 = runif(n()) ) , 
+  y = data_monthly %>% 
+    drop_na() %>% 
+    select(NO2) , 
+  size = 20 , linout = TRUE , MaxNWts = 1e4
+)
+
+# variables importance using Garson's algorithm
+NN_screen_importance <- NeuralNetTools::garson(NN_screen , bar_plot = FALSE) %>% 
+  tibble(variables = row.names(.))
+screen_plot <- NN_screen_importance %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # random 
+  mutate(class = ifelse(str_detect(variables , "R[123]") , "Random" , "Predictor variables")) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp , fill = class)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_lancet() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Screening of relevant predictor variables" , 
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+
+# variable selection
+included_var_garson <- NN_screen_importance %>% 
+  filter(rel_imp > NN_screen_importance %>% 
+           filter(str_detect(variables , "R[123]")) %>% 
+           # the max importance of the random-value variables 
+           summarize(rel_imp = max(rel_imp)) %>% 
+           unlist) %>% 
+  select(variables) %>% 
+  filter(!str_detect(variables , "R[123]")) %>% 
+  unlist %>% unname
+
+# =====================================
 # hyperparameters
 # =====================================
 hyperparm_vector <- hyper_evaluation %>% 
   arrange(MAE_CV) %>% 
-  dplyr::slice(1) %>% 
+  dplyr::slice(2) %>% 
   select(-contains("_training") , -contains("_CV")) %>% 
   unlist
 
-# layers        neurons         epochs     batch.size regularization 
-#      4             15             50              5              1 
+# layers        neurons         epochs     batch.size regularization regularization_factor garson_selection dropout_rate
+#      1             50             25             20              1                  0.01                1          0.1
+
 
 # =====================================
 # model with the full training set
@@ -100,7 +151,7 @@ hyperparm_vector <- hyper_evaluation %>%
     drop_na()
   # make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
@@ -108,6 +159,7 @@ hyperparm_vector <- hyper_evaluation %>%
 }
 
 # define model
+set_random_seed(1010) # reproducibility for Keras
 NN_define(hyperparm_vector = hyperparm_vector , n_var = ncol(predictor_train))
 # train model
 NN %>% 
@@ -135,18 +187,19 @@ for(k in as.factor(1:k_fold)){
     filter(CV == k)
   # data preparation: make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   predictor_test <- testing.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_test <- testing.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
+  set_random_seed(1010) # reproducibility for Keras
   NN_define(hyperparm_vector , n_var = ncol(predictor_train))
   # train model
   NN %>% 
@@ -181,18 +234,19 @@ for(k in as.factor(1:k_fold)){
     drop_na()
   # data preparation: make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   predictor_test <- testing.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_test <- testing.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
+  set_random_seed(1010) # reproducibility for Keras
   NN_define(hyperparm_vector , n_var = ncol(predictor_train))
   # train model
   NN %>% 
@@ -227,18 +281,19 @@ for(k in 1:12){
     drop_na()
   # data preparation: make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   predictor_test <- testing.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var_garson)) %>% 
     as.matrix()
   response_test <- testing.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
+  set_random_seed(1010) # reproducibility for Keras
   NN_define(hyperparm_vector , n_var = ncol(predictor_train))
   # train model
   NN %>% 
@@ -329,10 +384,12 @@ save_plot(
 # =====================================
 # spatial autocorrelation of the residuals
 # =====================================
-moran_df <- eval_resid_moran(NN_prediction)
+moran_month_df <- eval_resid_moran(NN_prediction , by_time = TRUE , col_time = "month")
+any(moran_month_df$p < 0.05)
+moran_mean_df <- eval_resid_moran(NN_prediction %>% drop_na() , by_time = FALSE)
 
 # visualization
-plot_resid_map(NN_prediction , # <-
+plot_resid_map(NN_prediction %>% drop_na() , # <-
                sprintf("%s (%s)" , str_to_title(model_name) , SAT_product))
 save_plot(
   sprintf("%s/residual-map_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
@@ -361,18 +418,23 @@ save_plot(
   # Moran's I
   out_dirpath_Moran <- "3_results/output-data/model_monthly/Moran"
   if(!dir.exists(out_dirpath_Moran)) dir.create(out_dirpath_Moran)
-  moran_df %>% 
+  moran_month_df %>% 
+    pivot_longer(cols = -month) %>% 
+    mutate(model = model_abbr , product = SAT_product) %>%
+    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+  moran_mean_df %>% 
     pivot_longer(cols = everything()) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%
-    write_csv(sprintf("%s/%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+    write_csv(sprintf("%s/mean_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
 }
 
 # =====================================
 # export model
 # =====================================
-{
-  out_dirpath_model <- "3_results/output-model/model_monthly"
-  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model)
-  saveRDS(NN , # <-
-          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
-}
+# {
+#   out_dirpath_model <- "3_results/output-model/model_monthly"
+#   if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model)
+#   
+#   saveRDS(NN , # <-
+#           file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+# }

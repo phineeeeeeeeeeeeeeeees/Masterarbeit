@@ -52,7 +52,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Gradient boosting machine"
 model_abbr <- "GBM"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 
 # //////////////////////////////////////////////////////////////////////////
@@ -431,10 +431,7 @@ moran_mean_df <- eval_resid_moran(xgb_final_prediction %>% drop_na() ,
 
 # visualization
 plot_resid_map(xgb_final_prediction , # <-
-               sprintf("%s (%s)" , str_to_title(model_name) , SAT_product)) +
-  scale_color_gradient2(low = "dodgerblue3" , mid = "white" , high = "deeppink3" , 
-                        #oob = scales::squish , 
-                        limits = c(-3,2))
+               sprintf("%s (%s)" , str_to_title(model_name) , SAT_product)) 
 save_plot(
   sprintf("%s/residual-map_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = last_plot() , 

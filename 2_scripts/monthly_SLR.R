@@ -50,7 +50,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Supervised stepwise linear regression"
 model_abbr <- "SLR"
-SAT_product <- c("OMI" , "TROPOMI")[1]
+SAT_product <- c("OMI" , "TROPOMI")[2]
 
 
 # //////////////////////////////////////////////////////////////////////////

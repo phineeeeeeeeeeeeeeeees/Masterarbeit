@@ -1,4 +1,4 @@
-library(keras)
+library(keras); library(tensorflow)
 
 NN_define <- function(hyperparm_vector , n_var){
   # | hyperparm_vector: a named vector with the hyperparameters 

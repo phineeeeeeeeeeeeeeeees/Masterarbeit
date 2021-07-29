@@ -1,0 +1,5 @@
+name,value,model,product
+Moran_I_statistic,-0.010776138292208207,GWR,spatial
+Expectation,-0.010526315789473684,GWR,spatial
+Variance,3.9402749281392384e-5,GWR,spatial
+p,0.5158731719646978,GWR,spatial

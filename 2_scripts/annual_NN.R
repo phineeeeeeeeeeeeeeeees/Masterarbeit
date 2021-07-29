@@ -16,6 +16,7 @@ library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
 library(keras)
+library(nnet) ; library(NeuralNetTools)
 
 source("2_scripts/utils_model-eval.R")
 
@@ -81,41 +82,90 @@ if(SAT_product == "OMI"){
 source("2_scripts/utils_define-NN.R")
 
 # =====================================
+# feature selection
+# =====================================
+# single-hidden-layer neural network for screening
+set.seed(20210727)
+NN_screen <- nnet(
+  x = data_annual %>% 
+    drop_na() %>% 
+    select(-all_of(columns_nonpredictor)) %>% 
+    # random-value variables
+    mutate(R1 = runif(n()) , 
+           R2 = runif(n()) ,
+           R3 = runif(n()) ) , 
+  y = data_annual %>% 
+    drop_na() %>% 
+    select(NO2) , 
+  size = 10 , linout = TRUE , MaxNWts = 1e4
+)
+
+# variables importance using Garson's algorithm
+NN_screen_importance <- NeuralNetTools::garson(NN_screen , bar_plot = FALSE) %>% 
+  tibble(variables = row.names(.))
+screen_plot <- NN_screen_importance %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # random 
+  mutate(class = ifelse(str_detect(variables , "R[123]") , "Random" , "Predictor variables")) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp , fill = class)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_lancet() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Screening of relevant predictor variables" , 
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+screen_plot
+
+# variable selection
+included_var_garson <- NN_screen_importance %>% 
+  filter(rel_imp > NN_screen_importance %>% 
+           filter(str_detect(variables , "R[123]")) %>% 
+           # the max importance of the random-value variables 
+           summarize(rel_imp = max(rel_imp)) %>% 
+           unlist) %>% 
+  select(variables) %>% 
+  filter(!str_detect(variables , "R[123]")) %>% 
+  unlist %>% unname
+# no selection
+included_var_all <- colnames(data_annual)[!colnames(data_annual) %in% columns_nonpredictor]
+
+# =====================================
 # hyperparameters
 # =====================================
 hyperparm_vector <- hyper_evaluation %>% 
   arrange(MAE_CV) %>% 
-  dplyr::slice(4) %>% 
+  dplyr::slice(2) %>% 
   select(-contains("_training") , -contains("_CV")) %>% 
   unlist
 
+# layers               neurons                epochs            batch.size        regularization 
+#      2                    30                    50                    10                     2 
+# regularization_factor      garson_selection          dropout_rate 
+#                 1e-03                     1                   0.2 
+
+# expired:
 # layers        neurons         epochs     batch.size regularization 
 #      4             15             50              5              1 
 
-# hyperparm_vector <- c("layers" = 2 ,
-#                       "neurons" = 100 ,
-#                       "epochs" = 100 ,
-#                       "batch.size" = 100 ,
-#                       "regularization" = 2)
+
 # =====================================
 # model with the full training set
 # =====================================
+if(is.na(hyperparm_vector["garson_selection"])){
+  included_var <- included_var_all
+}else if(hyperparm_vector["garson_selection"] == 1){
+  included_var <- included_var_garson
+}
+
 { # data preparation
-  training.data <- data_annual
-  # # variable selection
-  # included_var <- training.data %>% 
-  #   select(-c(spatial_CV , Station_name , Type_of_zone , Type_of_station , 
-  #             Altitude , Canton_ID , Canton_name , X , Y)) %>% 
-  #   pivot_longer(cols = -NO2) %>% 
-  #   group_by(name) %>% 
-  #   summarize(cor = cor(NO2 , value)) %>% 
-  #   ungroup %>% 
-  #   filter(abs(cor) > 0.2) %>% 
-  #   select(name) %>% unlist %>% unname
-  # make matrix
+  training.data <- data_annual %>% 
+    drop_na()
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
-    # select(all_of(included_var)) %>% 
+    select(all_of(included_var)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
@@ -123,6 +173,7 @@ hyperparm_vector <- hyper_evaluation %>%
 }
 
 # define model
+set_random_seed(1010) # reproducibility for Keras
 NN_define(hyperparm_vector = hyperparm_vector , n_var = ncol(predictor_train))
 # train model
 NN %>% 
@@ -144,23 +195,26 @@ NN_prediction_training <- training.data %>%
 for(k in as.factor(1:k_fold)){
   # data preparation: partition
   training.data <- data_annual %>% 
-    filter(CV != k)
+    filter(CV != k) %>% 
+    drop_na()
   testing.data <- data_annual %>% 
-    filter(CV == k)
+    filter(CV == k) %>% 
+    drop_na()
   # data preparation: make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   predictor_test <- testing.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var)) %>% 
     as.matrix()
   response_test <- testing.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
+  set_random_seed(1010) # reproducibility for Keras
   NN_define(hyperparm_vector , n_var = ncol(predictor_train))
   # train model
   NN %>% 
@@ -188,23 +242,26 @@ for(k in as.factor(1:k_fold)){
 for(k in as.factor(1:k_fold)){
   # data preparation: partition
   training.data <- data_annual %>% 
-    filter(spatial_CV != k)
+    filter(spatial_CV != k) %>% 
+    drop_na()
   testing.data <- data_annual %>% 
-    filter(spatial_CV == k)
+    filter(spatial_CV == k) %>% 
+    drop_na()
   # data preparation: make matrix
   predictor_train <- training.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var)) %>% 
     as.matrix()
   response_train <- training.data %>% 
     select(NO2) %>% 
     as.matrix()
   predictor_test <- testing.data %>% 
-    select(-all_of(columns_nonpredictor)) %>% 
+    select(all_of(included_var)) %>% 
     as.matrix()
   response_test <- testing.data %>% 
     select(NO2) %>% 
     as.matrix()
   # define model
+  set_random_seed(1010) # reproducibility for Keras
   NN_define(hyperparm_vector , n_var = ncol(predictor_train))
   # train model
   NN %>% 
@@ -324,10 +381,10 @@ save_plot(
 # =====================================
 # export model
 # =====================================
-{
-  out_dirpath_model <- "3_results/output-model/model_annual"
-  if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model)
-  saveRDS(NN , # <-
-          file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
-}
+# {
+#   out_dirpath_model <- "3_results/output-model/model_annual"
+#   if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model)
+#   saveRDS(NN , # <-
+#           file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+# }
 

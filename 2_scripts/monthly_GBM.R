@@ -52,7 +52,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Gradient boosting machine"
 model_abbr <- "GBM"
-SAT_product <- c("OMI" , "TROPOMI")[1]
+SAT_product <- c("OMI" , "TROPOMI")[2]
 
 
 # //////////////////////////////////////////////////////////////////////////

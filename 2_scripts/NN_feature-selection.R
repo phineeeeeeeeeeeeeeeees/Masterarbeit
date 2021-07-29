@@ -16,7 +16,7 @@ library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
 library(ranger)
-library(keras)
+library(keras) ; set_random_seed(1010) # reproducibility for Keras
 
 # =====================================
 # load datasets
