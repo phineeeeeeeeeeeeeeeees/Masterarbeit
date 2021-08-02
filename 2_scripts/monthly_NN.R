@@ -60,7 +60,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Neural network"
 model_abbr <- "NN"
-SAT_product <- c("OMI" , "TROPOMI")[1]
+SAT_product <- c("OMI" , "TROPOMI")[2]
 
 # subset data: satellite-product
 if(SAT_product == "OMI"){
@@ -135,7 +135,7 @@ included_var_garson <- NN_screen_importance %>%
 # =====================================
 hyperparm_vector <- hyper_evaluation %>% 
   arrange(MAE_CV) %>% 
-  dplyr::slice(2) %>% 
+  dplyr::slice(1) %>% 
   select(-contains("_training") , -contains("_CV")) %>% 
   unlist
 

@@ -153,7 +153,7 @@ search_hyper_grid <- function(hyper_grid_row){
   # hyper_grid_row is the hyperparameter (one row of "hyper_grid")
   # load packages for the clusters
   library(dplyr) ; library(tidyr) ; 
-  library(keras)
+  library(keras) ; library(tensorflow)
   library(Metrics)
   # =====================================
   # feature selection
