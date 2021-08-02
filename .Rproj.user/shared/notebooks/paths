@@ -17,5 +17,7 @@
 /Masterarbeit/analysis/2_scripts/monthly_RF_gridsearch.R="B223296B"
 /Masterarbeit/analysis/2_scripts/monthly_SLR.R="BE660983"
 /Masterarbeit/analysis/2_scripts/monthly_lmer.R="6D436F6E"
+/Masterarbeit/analysis/2_scripts/monthly_model-comparison.R="A933266C"
 /Masterarbeit/analysis/2_scripts/site-road-dist.R="66C55D9A"
 /Masterarbeit/analysis/2_scripts/spatial-CV.R="47AEF98C"
+/Masterarbeit/analysis/2_scripts/utils_model-eval.R="90EA4801"
