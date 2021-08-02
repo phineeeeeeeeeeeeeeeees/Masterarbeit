@@ -96,12 +96,15 @@ model_prediction_road <- model_prediction %>%
     sites_road %>% 
       select(Station_name , starts_with("dist_") , starts_with("DTV")), 
     by = "Station_name"
-  )
-
-model_prediction_road %>% 
+  ) %>% 
+  # binary: <100m to nearest major road
+  mutate(near = ifelse(dist_nearest_mainroad_bysite < 100 , "1" , "0") %>% 
+           factor(levels = c("1" , "0"))) %>% 
   # re-order for visualization
   mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
+         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI")))
+
+model_prediction_road %>% 
   # visualization
   ggplot(aes(x = dist_nearest_mainroad_bysite , y = residual_CV)) +
   geom_point(shape = 1) +
@@ -113,3 +116,23 @@ model_prediction_road %>%
        x = "meter" ,  y = "Cross-validation residual") +
   theme_bw()
 
+model_prediction_road %>% 
+  ggplot(aes(x = near , y = residual_CV)) +
+  ggdist::stat_halfeye() +
+  facet_wrap(~model + product) +
+  scale_x_discrete(labels = c("<100m" , "≥100m") , name = "Distance to the nearest main road") +
+  labs(y = "Cross-validation residual") +
+  theme_bw()
+
+model_residual_mainroad_test <- model_prediction_road %>% 
+  select(model , product , near , residual_CV) %>% 
+  group_by(model , product) %>% 
+  group_modify(
+    ~ t.test(residual_CV ~ near , data = .x , alternative = "greater") %>% 
+      broom::tidy()
+  ) %>% 
+  ungroup() %>% 
+  mutate(significance = p.value < 0.05)
+
+model_residual_mainroad_test %>% 
+  select(model , product , statistic , p.value , conf.low , conf.high , alternative , significance)

@@ -22,11 +22,11 @@ model_indices <- in_filepath_indices %>%
   lapply(read_csv) %>% 
   bind_rows()
 # model observed versus predicted values
-model_prediction <- list.files("3_results/output-data/model_annual/observed-predicted" , pattern = ".csv$" , full.names = TRUE) %>% 
+model_prediction <- list.files("3_results/output-data/model_monthly/observed-predicted" , pattern = ".csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
   bind_rows()
 # model residual Moran's I
-model_moran <- list.files("3_results/output-data/model_annual/moran" , pattern = ".csv$" , full.names = TRUE) %>% 
+model_moran <- list.files("3_results/output-data/model_monthly/moran" , pattern = "mean_[[:alpha:]]+_[[:alpha:]]+.csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
   bind_rows()
 
@@ -48,14 +48,15 @@ model_compare_tidy <- model_indices %>%
   select(model , product , type , name , value) %>% 
   pivot_wider(names_from = c(type , name) , names_sep = "_" , values_from = value) %>% 
   # re-order rows
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI"))) %>% 
   arrange(model , product) %>% 
   # re-order columns
   select(model , product , 
          training_R2 , training_RMSE , training_slope , training_intercept , 
          CV_R2 , CV_RMSE , CV_slope , CV_intercept , 
-         spatialCV_R2 , spatialCV_RMSE , spatialCV_slope , spatialCV_intercept) %>% 
+         spatialCV_R2 , spatialCV_RMSE , spatialCV_slope , spatialCV_intercept , 
+         temporalCV_R2 , temporalCV_RMSE , temporalCV_slope , temporalCV_intercept) %>% 
   # Moran's I
   left_join(
     model_moran %>% 
@@ -70,21 +71,23 @@ model_compare_tidy <- model_indices %>%
 
 # export the tidy table
 model_compare_tidy %>% 
-  write_csv("3_results/output-data/model_annual/model_annual_indices.csv")
+  write_csv("3_results/output-data/model_monthly/model_monthly_indices.csv")
 # tidy table with R2, RMSE, Moran's I
 model_compare_tidy %>% 
   select(model , product , 
          training_R2 , training_RMSE , 
          CV_R2 , CV_RMSE , 
-         spatialCV_R2 , spatialCV_RMSE , starts_with("MoransI")) %>% 
-  write_csv("3_results/output-data/model_annual/model_annual_indices_1.csv")
+         spatialCV_R2 , spatialCV_RMSE , 
+         temporalCV_R2 , temporalCV_RMSE, starts_with("MoransI")) %>% 
+  write_csv("3_results/output-data/model_monthly/model_monthly_indices_1.csv")
 # tidy table with slope and intercept
 model_compare_tidy %>% 
   select(model , product , 
          training_slope , training_intercept , 
          CV_slope , CV_intercept , 
-         spatialCV_slope , spatialCV_intercept) %>% 
-  write_csv("3_results/output-data/model_annual/model_annual_indices_2.csv")
+         spatialCV_slope , spatialCV_intercept , 
+         temporalCV_slope , temporalCV_intercept) %>% 
+  write_csv("3_results/output-data/model_monthly/model_monthly_indices_2.csv")
 
 # =====================================
 # residual diagnostics
@@ -96,12 +99,15 @@ model_prediction_road <- model_prediction %>%
     sites_road %>% 
       select(Station_name , starts_with("dist_") , starts_with("DTV")), 
     by = "Station_name"
-  )
+  ) %>% 
+  # binary: <100m to nearest major road
+  mutate(near = ifelse(dist_nearest_mainroad_bysite < 100 , "1" , "0") %>% 
+           factor(levels = c("1" , "0"))) %>% 
+  # re-order for visualization
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI")))
 
 model_prediction_road %>% 
-  # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
   # visualization
   ggplot(aes(x = dist_nearest_mainroad_bysite , y = residual_CV)) +
   geom_point(shape = 1) +
@@ -109,7 +115,28 @@ model_prediction_road %>%
   scale_x_log10() +
   facet_wrap(~model + product) +
   labs(title = "The distance from the monitoring sites to the nearest major road" , 
-       subtitle = "Annual models" ,
+       subtitle = "Monthly models" ,
        x = "meter" ,  y = "Cross-validation residual") +
   theme_bw()
+
+model_prediction_road %>% 
+  ggplot(aes(x = near , y = residual_CV)) +
+  ggdist::stat_halfeye() +
+  facet_wrap(~model + product) +
+  scale_x_discrete(labels = c("<100m" , "≥100m") , name = "Distance to the nearest main road") +
+  labs(y = "Cross-validation residual") +
+  theme_bw()
+
+model_residual_mainroad_test <- model_prediction_road %>% 
+  select(model , product , near , residual_CV) %>% 
+  group_by(model , product) %>% 
+  group_modify(
+    ~ t.test(residual_CV ~ near , data = .x , alternative = "greater") %>% 
+      broom::tidy()
+  ) %>% 
+  ungroup() %>% 
+  mutate(significance = p.value < 0.05)
+  
+model_residual_mainroad_test %>% 
+  select(model , product , statistic , p.value , conf.low , conf.high , alternative , significance)
 
