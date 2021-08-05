@@ -1,8 +1,8 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Comparison of the annual models
-# 2021-06-29
+# Comparison of the monthly models
+# 2021-08-02
 #####################################################################################################
 
 # =====================================
@@ -17,7 +17,7 @@ library(lubridate) ; library(stringr)
 # load data
 # =====================================
 # model performance indices 
-in_filepath_indices <- list.files("3_results/output-data/model_annual/indices" , pattern = ".csv$" , full.names = TRUE)
+in_filepath_indices <- list.files("3_results/output-data/model_monthly/indices" , pattern = ".csv$" , full.names = TRUE)
 model_indices <- in_filepath_indices %>% 
   lapply(read_csv) %>% 
   bind_rows()
