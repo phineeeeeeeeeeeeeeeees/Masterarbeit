@@ -83,7 +83,7 @@ source("2_scripts/utils_define-NN.R")
 # feature selection
 # =====================================
 # single-hidden-layer neural network for screening
-set.seed(20210727)
+set.seed(20210803)
 NN_screen <- nnet(
   x = data_daily %>% 
     drop_na() %>% 

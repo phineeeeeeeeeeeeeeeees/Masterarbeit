@@ -44,7 +44,7 @@ eval_performance_indices <- function(model_prediction_df){
     summarize(R2 = cor(NO2 , predicted)^2 , 
               RMSE = rmse(NO2 , predicted)) %>% 
     pivot_longer(cols = c(R2 , RMSE)) %>% 
-    # min/max of CV-R2/RMS
+    # min/max of CV-R2/RMSE
     left_join(
       model_prediction_df %>%  # <-
         # remove columns with missing values 
@@ -223,11 +223,14 @@ plot_resid_month <- function(model_prediction_df , subtitle_text = NULL , daily 
     # daily
     model_prediction_df %>% 
       mutate(month = month(date)) %>% 
-      group_by(month) %>% 
-      summarise(residual = mean(residual , na.rm = TRUE)) %>% 
-      ungroup() %>% 
+      pivot_longer(cols = c(residual , residual_temporalCV) , values_to = "residual") %>% # 
+      mutate(name = ifelse(str_detect(name , "temporalCV") , "Temporal CV" , "Full model")) %>% # 
+      # group_by(month) %>% 
+      # summarise(residual = mean(residual , na.rm = TRUE)) %>% 
+      # ungroup() %>% 
       ggplot(aes(x = factor(month) , y = residual)) +
       geom_violin(fill = "grey50" , color = "grey30" , alpha = 0.5 , draw_quantiles = 0.5) +
+      facet_grid(~name) + # 
       labs(x = "Month" , y = "Residuals" , 
            title = "Distribution of residuals by month" , 
            subtitle = subtitle_text) +
