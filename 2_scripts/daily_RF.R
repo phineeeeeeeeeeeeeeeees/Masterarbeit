@@ -51,15 +51,15 @@ columns_nonpredictor <- c("Station_name" , "Type_of_zone" , "Type_of_station" ,
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Random forest"
 model_abbr <- "RF"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 # random forest hyperparameters
 hyper_grid <- read_csv("3_results/output-data/model_daily/RF_grid-search/hyper_evaluation.csv")
 hyperparm_final <- hyper_grid %>% 
   arrange(-CV_R2) %>% 
-  slice(5) %>% 
+  slice(1) %>% 
   as.list() 
-# mtry = 5 , N.trees = 1000
+# mtry = 8 , N.trees = 1000
 
 # =====================================
 # subset data: satellite-product
