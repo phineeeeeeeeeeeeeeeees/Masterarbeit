@@ -49,9 +49,6 @@ columns_nonpredictor <- c("Station_name" , "Type_of_zone" , "Type_of_station" ,
 SAT_product <- "TROPOMI"
 # for now I grid-search the model using TROPOMI and use the same hyperparameter set for OMI
 
-# //////////////////////////////////////////////////////////////////////////
-# data preparation for xgboost
-# //////////////////////////////////////////////////////////////////////////
 # subset data: satellite-product
 if(SAT_product == "OMI"){
   # for the OMI model: exclude TROPOMI and meteorological variables at 12H
