@@ -232,7 +232,7 @@ plot_resid_month <- function(model_prediction_df , subtitle_text = NULL , daily 
       geom_violin(fill = "grey50" , color = "grey30" , alpha = 0.5 , draw_quantiles = 0.5) +
       facet_grid(~name) + # 
       labs(x = "Month" , y = "Residuals" , 
-           title = "Distribution of residuals by month" , 
+           title = "Distribution of the model residuals by month" , 
            subtitle = subtitle_text) +
       theme_bw()
   }
