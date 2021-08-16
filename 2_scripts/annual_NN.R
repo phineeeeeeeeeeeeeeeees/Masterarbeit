@@ -143,13 +143,9 @@ hyperparm_vector <- hyper_evaluation %>%
   unlist
 
 # layers               neurons                epochs            batch.size        regularization 
-#      2                    30                    50                    10                     2 
+#      2                     5                    50                     5                     2 
 # regularization_factor      garson_selection          dropout_rate 
-#                 1e-03                     1                   0.2 
-
-# expired:
-# layers        neurons         epochs     batch.size regularization 
-#      4             15             50              5              1 
+#                 1e-03                    NA                     0 
 
 
 # =====================================
@@ -335,6 +331,14 @@ save_plot(
   sprintf("%s/residuals_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = last_plot() , 
   base_width = 7.8 , base_height = 6
+)
+
+# variable importance screening
+screen_plot
+save_plot(
+  sprintf("%s/importance-screening_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = screen_plot , 
+  base_width = 5 , base_height = 8
 )
 
 # =====================================

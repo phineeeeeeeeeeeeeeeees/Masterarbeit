@@ -140,7 +140,7 @@ hyperparm_vector <- hyper_evaluation %>%
   unlist
 
 # layers        neurons         epochs     batch.size regularization regularization_factor garson_selection dropout_rate
-#      1             50             25             20              1                  0.01                1          0.1
+#      2              5             25             10              1                0.001                 1            0
 
 
 # =====================================
@@ -379,6 +379,32 @@ save_plot(
   sprintf("%s/residuals-month_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = last_plot() , 
   base_width = 6 , base_height = 3
+)
+
+# variable importance screening
+screen_plot
+save_plot(
+  sprintf("%s/importance-screening_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = screen_plot , 
+  base_width = 5 , base_height = 8
+)
+NN_screen_importance %>% 
+  filter(variables %in% included_var_garson) %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Included variables" , 
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+save_plot(
+  sprintf("%s/importance-included_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 5 , base_height = 6
 )
 
 # =====================================

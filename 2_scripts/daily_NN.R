@@ -151,6 +151,8 @@ hyperparm_vector <- hyper_evaluation %>%
   select(-contains("_training") , -contains("_CV")) %>% 
   unlist
 
+# layers  neurons  epochs  batch.size  regularization  regularization_factor  garson_selection  dropout_rate
+#      3       50     50            3               2                  0.001                 1           0.1
 
 # =====================================
 # model with the full training set
@@ -315,7 +317,7 @@ for(k in 1:12){
         verbose = FALSE)
   # prediction
   prediction_test <- testing.data %>% 
-    select(date , Station_name , NO2 , Type_of_station) %>% 
+    select(date , month , Station_name , NO2 , Type_of_station) %>% 
     # prediction
     mutate(predicted_temporalCV = predict(NN , predictor_test)[,1])
   # prediction data.frame
@@ -393,13 +395,31 @@ save_plot(
   base_width = 6 , base_height = 3
 )
 
-# screening of relevant predictor variables 
+# variable importance screening
+screen_plot
 save_plot(
-  sprintf("%s/%s_screening_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  sprintf("%s/importance-screening_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = screen_plot , 
-  base_width = 5 , base_height = 9
+  base_width = 5 , base_height = 8
 )
-
+NN_screen_importance %>% 
+  filter(variables %in% included_var_garson) %>% 
+  # re-order for visualization
+  mutate(variables = factor(variables , levels = variables[order(rel_imp)])) %>% 
+  # visualization
+  ggplot(aes(x = variables , y = rel_imp)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(x = "Variables" , y = "Variable importance" , 
+       title = "Included variables" , 
+       subtitle = "Relative importance of input variables in neural networks \nusing Garson's algorithm") +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = 4) , legend.position = "bottom")
+save_plot(
+  sprintf("%s/importance-included_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
+  plot = last_plot() , 
+  base_width = 5 , base_height = 6
+)
 # =====================================
 # spatial autocorrelation of the residuals
 # =====================================

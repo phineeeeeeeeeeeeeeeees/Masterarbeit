@@ -83,24 +83,25 @@ NO2_sites_CV <- NO2_sites_CV %>%
 table(NO2_sites_CV$spatial_CV)
 table(NO2_sites_CV$CV)
 # visualization
-NO2_sites_CV %>% 
-  # pivot_longer
-  gather(key = "type" , value = "fold" , ends_with("CV")) %>% 
-  # rename
-  mutate(type = ifelse(str_detect(type , "spatial") , "spatially-blocked CV" , "random CV")) %>% 
-  # visualization
-  group_by(type) %>% 
-  group_map(
-    ~ ggplot() +
-      geom_sf(data = CH_CV , color = "azure3") +
-      geom_sf(data = .x , aes(color = fold)) +
-      scale_color_jco(labels = paste0(1:10 , " (n=" , table(.x$fold) , ")")) +
-      labs(title = sprintf("%s-fold %s cross validation" , k_fold , str_remove(.y$type , " CV")) , 
-           color = "CV-group") +
-      theme_light() +
-      theme(legend.position = "bottom")
-  ) %>% 
-  cowplot::plot_grid(plotlist = . , align = "h" , axis = "tb" , nrow = 1)
+cowplot::plot_grid(
+  NO2_sites_CV %>% 
+    ggplot() +
+    geom_sf(data = CH , color = NA) +
+    geom_sf(aes(color = CV)) +
+    labs(title = "5-fold random-split cross validation" , color = "CV fold") +
+    scale_color_discrete(labels = paste0(1:5 , " (n=" , table(NO2_sites_CV$CV) , ")")) +
+    theme_light() +
+    theme(legend.position = "bottom") ,
+  NO2_sites_CV %>% 
+    ggplot() +
+    geom_sf(data = CH_CV , color = "white" , linetype = 2) +
+    geom_sf(aes(color = spatial_CV)) +
+    labs(title = "5-fold spatially-blocked cross validation" , color = "CV fold") +
+    scale_color_jco(labels = paste0(1:5 , " (n=" , table(NO2_sites_CV$spatial_CV) , ")")) +
+    theme_light() +
+    theme(legend.position = "bottom") ,
+  align = "h" , axis = "tb" , nrow = 1
+)
   
 # cross table: CV group and station type
 NO2_sites_CV %>%
