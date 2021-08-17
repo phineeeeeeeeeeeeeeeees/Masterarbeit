@@ -1,7 +1,7 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Monthly model: Generalized boosting machine-- grid search of hyperparameters
+# Monthly model: Gradient boosting machine-- grid search of hyperparameters
 # 2021-07-16
 #####################################################################################################
 
