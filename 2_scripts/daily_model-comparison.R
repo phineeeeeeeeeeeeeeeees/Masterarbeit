@@ -147,12 +147,13 @@ model_prediction %>%
   facet_grid(product ~ model) +
   labs(title = "RMSE of the temporally-blocked cross validations" , 
        x = "Month (Temporally-blocked CV fold)" , y = "Temporally-blocked CV-RMSE") +
-  theme_bw() 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90 , vjust = 0.5, hjust = 1))
 
 save_plot(
   sprintf("3_results/output-graph/model_%s/compare_temporal_CV_RMSE.png" , tempres) , 
   plot = last_plot() , 
-  base_width = 9 , base_height = 6
+  base_width = 10 , base_height = 6
 )
 
 # =====================================

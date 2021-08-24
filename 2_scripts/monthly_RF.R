@@ -290,7 +290,7 @@ plot_resid(rf_final_prediction , # <-
 save_plot(
   sprintf("%s/residuals_%s_%s.png" , out_dirpath_plots , model_abbr , SAT_product) , 
   plot = last_plot() , 
-  base_width = 7 , base_height = 7
+  base_width = 7.8 , base_height = 6
 )
 
 # residuals by month
