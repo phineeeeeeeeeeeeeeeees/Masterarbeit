@@ -61,7 +61,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Supervised stepwise linear regression"
 model_abbr <- "SLR"
-SAT_product <- c("spatial" , "OMI" , "TROPOMI")[3]
+SAT_product <- c("spatial" , "OMI" , "TROPOMI")[1]
 
 # //////////////////////////////////////////////////////////////////////////
 # supervised stepwise linear regression algorithm
@@ -78,7 +78,7 @@ SAT_product <- c("spatial" , "OMI" , "TROPOMI")[3]
       select(-OMI_NO2 , -ends_with("_15H")) 
   }else if(SAT_product == "spatial"){
     data_annual <- data_annual_raw %>% 
-      select(-OMI_NO2 , -ends_with("_15H")) 
+      select(-TROPOMI_NO2 , -ends_with("_12H")) 
   }
   # =====================================
   # expected direction of effect: 

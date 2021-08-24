@@ -11,6 +11,7 @@
 library(dplyr) ; library(tidyr)
 library(sf)
 library(ggplot2) ; library(ggsci) ; library(ggthemes) 
+library(ggpointdensity)
 library(cowplot)
 library(lubridate) ; library(stringr)
 library(spdep)
@@ -118,16 +119,17 @@ plot_obs_pred <- function(model_prediction_df , subtitle_text = NULL){
     # visualization
     ggplot(aes(x = predicted , y = NO2)) +
     geom_abline(intercept = 0 , slope = 1 , color = "azure3") +
-    geom_point(aes(color = Type_of_station) , shape = 1 , alpha = 0.8) +
+    #geom_point(aes(color = Type_of_station) , shape = 1 , alpha = 0.8) +
+    geom_pointdensity(shape = 1 , alpha = 0.8) +
+    scale_color_viridis_c() +
     geom_smooth(method = "lm") +
     facet_grid(~type) +
     labs(x = expression("Model-estimated NO"[2]) , y = expression("Observed NO"[2]) , 
          title = "Observed vs estimated" , 
-         subtitle = subtitle_text , 
-         color = "Monitoring station type") +
+         subtitle = subtitle_text) +
     coord_fixed() +
     theme_bw() +
-    theme(legend.position = "bottom")
+    theme(legend.position = "none")
 }
 
 # three residual diagnostic plots at the same time (obs<->resid, histogram, QQ-plot)
@@ -149,20 +151,21 @@ plot_resid <- function(model_prediction_df , title_text){
       # visualization
       ggplot(aes(x = predicted , y = residual)) +
       geom_hline(yintercept = 0 , linetype = 2 , color = "grey50") +
-      geom_point(aes(color = Type_of_station) , shape = 1 , alpha = 0.8) +
+      geom_pointdensity(shape = 1 , alpha = 0.8) +
       geom_smooth() + 
       facet_grid(type~.) +
       # scale_color_discrete(labels = c("Background" , "Industry" , "Traffic") , 
       #                      guide = guide_legend(direction = "vertical", title.position = "top",
       #                                           label.position="top", label.hjust = 0.5, label.vjust = 0.5,
       #                                           label.theme = element_text(angle = 90 , size = 8))) +
-      scale_color_discrete(labels = c("BG" , "IND" , "TRAF")) +
+      # scale_color_discrete(labels = c("BG" , "IND" , "TRAF")) +
+      scale_color_viridis_c() +
       labs(x = expression("Model-estimated NO"[2]) , y = "Residuals" , 
            color = "" , 
            subtitle = "Residuals vs fitted") +
       coord_fixed(ylim = c(min(plot_input_df$residual) , max(plot_input_df$residual))) +
       theme_bw() +
-      theme(legend.position = "bottom" , 
+      theme(legend.position = "none" , 
             legend.margin = margin(-1,0,0,0,"pt")) , 
     # Histogram of the residuals
     plot_input_df %>% 

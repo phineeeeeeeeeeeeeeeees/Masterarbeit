@@ -22,17 +22,25 @@ tempres <- "daily"
 model_indices <- list.files(sprintf("3_results/output-data/model_%s/indices" , tempres) , 
                                   pattern = ".csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI")))
+
 # model observed versus predicted values
 model_prediction <- list.files(sprintf("3_results/output-data/model_%s/observed-predicted" , tempres) , 
                                pattern = ".csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI")))
+
 # model residual Moran's I
 model_moran <- list.files(sprintf("3_results/output-data/model_%s/moran" , tempres) , 
                           pattern = "mean_[[:alpha:]]+_[[:alpha:]]+.csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI")))
 
 # distance from the monitoring sites to the nearest road
 sites_road <- read_csv("1_data/processed/cleaned/extracted/site-road-distance.csv")
@@ -52,8 +60,6 @@ model_compare_tidy <- model_indices %>%
   select(model , product , type , name , value) %>% 
   pivot_wider(names_from = c(type , name) , names_sep = "_" , values_from = value) %>% 
   # re-order rows
-  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("OMI" , "TROPOMI"))) %>% 
   arrange(model , product) %>% 
   # re-order columns
   select(model , product , 
@@ -99,9 +105,7 @@ model_compare_tidy %>%
 model_prediction %>% 
   filter(!if_any(everything() , is.na)) %>% 
   # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("OMI" , "TROPOMI")) , 
-         spatial_CV = factor(spatial_CV)) %>% 
+  mutate(spatial_CV = factor(spatial_CV)) %>% 
   # fold-specific RMSE
   group_by(model, product , spatial_CV) %>% 
   summarize(RMSE_spatialCV = Metrics::rmse(NO2 , predicted_spatialCV)) %>% 
@@ -130,9 +134,7 @@ save_plot(
 model_prediction %>% 
   filter(!if_any(everything() , is.na)) %>% 
   # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("OMI" , "TROPOMI")) , 
-         month = factor(month)) %>% 
+  mutate(month = factor(month)) %>% 
   # fold-specific RMSE
   group_by(model, product , month) %>% 
   summarize(RMSE_temporalCV = Metrics::rmse(NO2 , predicted_temporalCV)) %>% 
@@ -141,7 +143,7 @@ model_prediction %>%
   ggplot(aes(x = month , y = RMSE_temporalCV)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = format(RMSE_temporalCV , digits = 3)) , 
-            angle = 90 , hjust = 1.2 , color = "white" , size = 2.5) +
+            angle = 90 , hjust = 1.2 , color = "white" , size = 2) +
   facet_grid(product ~ model) +
   labs(title = "RMSE of the temporally-blocked cross validations" , 
        x = "Month (Temporally-blocked CV fold)" , y = "Temporally-blocked CV-RMSE") +
@@ -158,16 +160,13 @@ save_plot(
 # =====================================
 model_prediction %>% 
   filter(!if_any(everything() , is.na)) %>% 
-  # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("OMI" , "TROPOMI"))) %>% 
   select(model , product , residual_CV , date , Station_name) %>% 
   pivot_wider(id_cols = c(date , Station_name , product) , names_from = model , values_from = residual_CV) %>% 
   # correlation matrix plot
   group_by(product) %>% 
   group_map(
     ~ .x %>% 
-      GGally::ggpairs(columns = c("SLR" , "SLMER" , "RF" , "GBM" , "NN")) +
+      GGally::ggpairs(columns = c("SLR" , "SLMER" , "RF" , "XGB" , "LGB" , "NN")) +
       labs(subtitle = .y$product , 
            x = "CV residuals" , y = "CV residuals") +
       theme_bw() +

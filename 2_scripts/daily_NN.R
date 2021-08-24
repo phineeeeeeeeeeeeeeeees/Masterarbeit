@@ -62,7 +62,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Neural network"
 model_abbr <- "NN"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 # subset data: satellite-product
 if(SAT_product == "OMI"){
@@ -460,7 +460,7 @@ save_plot(
   moran_month_df %>% 
     pivot_longer(cols = -date) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%
-    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+    write_csv(sprintf("%s/day_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
   moran_mean_df %>% 
     pivot_longer(cols = everything()) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%

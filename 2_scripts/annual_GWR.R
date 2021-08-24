@@ -49,7 +49,7 @@ CH <- st_read("1_data/raw/Switzerland_shapefile/CHE_adm0.shp") %>%
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Geographically weighted regression"
 model_abbr <- "GWR"
-SAT_product <- c("spatial" , "OMI" , "TROPOMI")[3]
+SAT_product <- c("spatial" , "OMI" , "TROPOMI")[1]
 
 # =====================================
 # SLR model formulas

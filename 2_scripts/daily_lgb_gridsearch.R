@@ -1,8 +1,8 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Monthly model: Light gradient boosting machine (LightGBM)-- grid search of hyperparameters
-# 2021-07-16
+# Daily model: Light gradient boosting machine (LightGBM)-- grid search of hyperparameters
+# 2021-08-16
 #####################################################################################################
 
 # =====================================
@@ -16,6 +16,7 @@ library(lubridate) ; library(stringr)
 library(spdep)
 library(Metrics)
 library(lightgbm)
+library(parallel) ; library(pbapply)
 
 
 # =====================================
@@ -52,7 +53,7 @@ SAT_product <- "TROPOMI"
 
 
 # //////////////////////////////////////////////////////////////////////////
-# data preparation for xgboost
+# data preparation for LightGBM
 # //////////////////////////////////////////////////////////////////////////
 if(SAT_product == "OMI"){
   data_daily <- data_daily_raw %>% 
@@ -170,7 +171,7 @@ hyper_grid <- expand.grid(
   # This behavior can be changed by setting feature_fraction to a value > 0 and <= 1.0. 
   # Setting feature_fraction to 0.5, for example, tells LightGBM to randomly select 50% of features at the beginning of constructing each tree.
   feature_fraction = c(0.5,0.75,1) ,
-  # booster
+  # boosters
   boosting_type = c("gbdt" , "dart") ,
   # a place to dump results
   optimal_trees = NA,               
@@ -178,14 +179,30 @@ hyper_grid <- expand.grid(
 )
 
 # =====================================
-# grid search 
+# grid search (parallelized)
 # =====================================
-pb <- txtProgressBar(min = 1 , max = nrow(hyper_grid) , style = 3 )
-for(i in 1:nrow(hyper_grid)) {
+# make clusters
+cl <- makeCluster(detectCores())
+# clusterExport (R objects across clusters)
+clusterExport(
+  cl = cl , 
+  varlist = c("data_daily" , "CV_folds" , "included_var" , "response_full" , "columns_nonpredictor")
+)
+# random seed
+clusterSetRNGStream(cl , 123)
+# grid search function for "apply"
+search_hyper_grid <- function(hyper_grid_row){
+  # hyper_grid_row is the hyperparameter (one row of "hyper_grid") (a character vector)
+  # ---------------------------------------
+  # load packages for the clusters
+  library(dplyr) ; library(lightgbm)
   # create parameter list
-  hyper_i <- hyper_grid %>% 
-    dplyr::slice(i) %>% 
-    select(-optimal_trees , -min_RMSE) %>% 
+  hyper_i <- hyper_grid_row %>% 
+    as.list() %>% as_tibble() %>% 
+    select(-optimal_trees, -min_RMSE) %>% 
+    mutate(across(selection , as.logical)) %>% 
+    mutate(across(c(learning_rate , max_depth , num_leaves , bagging_fraction , feature_fraction) , as.numeric)) %>% 
+    mutate(across(boosting_type , as.character)) %>% 
     as.list()
   # variable selection
   if(hyper_i$selection){
@@ -197,8 +214,8 @@ for(i in 1:nrow(hyper_grid)) {
       select(-all_of(columns_nonpredictor)) %>% 
       as.matrix()
   }
-  # reproducibility
-  set.seed(123)
+  # # reproducibility
+  # set.seed(123) # use clusterSetRNGStream(cl , 123) for parallel computation
   # cross validation
   lgb_grid <- lgb.cv(
     params = hyper_i , 
@@ -215,23 +232,27 @@ for(i in 1:nrow(hyper_grid)) {
   )
   # evaluation (add to hyper_grid data.frame)
   # the number of iterations with the lowest CV-RMSE
-  hyper_grid$optimal_trees[i] <- lgb_grid$record_evals$valid$rmse$eval %>% unlist %>% which.min()
+  hyper_grid_row$optimal_trees <- lgb_grid$record_evals$valid$rmse$eval %>% unlist %>% which.min()
   # CV-RMSE
-  hyper_grid$min_RMSE[i] <- lgb_grid$record_evals$valid$rmse$eval %>% unlist %>% min()
-  # progress bar
-  setTxtProgressBar(pb,i)
-  # clean environment
-  rm(hyper_i , xgb_grid)
+  hyper_grid_row$min_RMSE <- lgb_grid$record_evals$valid$rmse$eval %>% unlist %>% min()
+  # ---------------------------------------
+  return(hyper_grid_row)
 }
-rm(pb,i)
 
+# grid search (parallelized)
+hyper_grid_result <- hyper_grid %>% 
+  pbapply(MARGIN = 1 , FUN = search_hyper_grid , cl = cl) %>% 
+  bind_rows()
+
+# turn off cluster
+stopCluster(cl)
 
 # =====================================
 # export grid search results
 # =====================================
 out_dirpath_hypergrid <- "3_results/output-data/model_daily/LGB_grid-search"
 if(!dir.exists(out_dirpath_hypergrid)) dir.create(out_dirpath_hypergrid , recursive = TRUE)
-hyper_grid %>%
+hyper_grid_result %>%
   write_csv(sprintf("%s/hyper_evaluation.csv" , out_dirpath_hypergrid))
 
 

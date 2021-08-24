@@ -50,7 +50,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Supervised stepwise linear regression"
 model_abbr <- "SLR"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 # //////////////////////////////////////////////////////////////////////////
 # data inspection and preparation
@@ -650,7 +650,7 @@ save_plot(
   moran_day_df %>% 
     pivot_longer(cols = -date) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%
-    write_csv(sprintf("%s/month_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
+    write_csv(sprintf("%s/day_%s_%s.csv" , out_dirpath_Moran , model_abbr , SAT_product))
   moran_mean_df %>% 
     pivot_longer(cols = everything()) %>% 
     mutate(model = model_abbr , product = SAT_product) %>%

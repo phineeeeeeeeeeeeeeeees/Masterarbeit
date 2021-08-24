@@ -51,7 +51,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Supervised stepwise linear mixed-effect regression"
 model_abbr <- "SLMER"
-SAT_product <- c("OMI" , "TROPOMI")[2]
+SAT_product <- c("OMI" , "TROPOMI")[1]
 
 # //////////////////////////////////////////////////////////////////////////
 # data inspection

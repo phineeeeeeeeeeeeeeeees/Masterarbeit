@@ -22,19 +22,25 @@ tempres <- "annual"
 model_indices <- list.files(sprintf("3_results/output-data/model_%s/indices" , tempres) , 
                                   pattern = ".csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI")))
 
 # model observed versus predicted values
 model_prediction <- list.files(sprintf("3_results/output-data/model_%s/observed-predicted" , tempres) , 
                                pattern = ".csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI")))
 
 # model residual Moran's I
 model_moran <- list.files(sprintf("3_results/output-data/model_%s/moran" , tempres) , 
                           pattern = "[[:alpha:]]+_[[:alpha:]]+.csv$" , full.names = TRUE) %>% 
   lapply(read_csv) %>% 
-  bind_rows()
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI")))
 
 # distance from the monitoring sites to the nearest road
 sites_road <- read_csv("1_data/processed/cleaned/extracted/site-road-distance.csv")
@@ -54,8 +60,6 @@ model_compare_tidy <- model_indices %>%
   select(model , product , type , name , value) %>% 
   pivot_wider(names_from = c(type , name) , names_sep = "_" , values_from = value) %>% 
   # re-order rows
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
   arrange(model , product) %>% 
   # re-order columns
   select(model , product , 
@@ -99,9 +103,7 @@ model_compare_tidy %>%
 model_prediction %>% 
   filter(!if_any(everything() , is.na)) %>% 
   # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI")) , 
-         spatial_CV = factor(spatial_CV)) %>% 
+  mutate(spatial_CV = factor(spatial_CV)) %>% 
   # fold-specific RMSE
   group_by(model, product , spatial_CV) %>% 
   summarize(RMSE_spatialCV = Metrics::rmse(NO2 , predicted_spatialCV)) %>% 
@@ -130,9 +132,6 @@ save_plot(
 # =====================================
 model_prediction %>% 
   filter(!if_any(everything() , is.na)) %>% 
-  # re-order for visualization
-  mutate(model = factor(model , levels = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) , 
-         product = factor(product , levels = c("spatial" , "OMI" , "TROPOMI"))) %>% 
   select(model , product , residual_CV , Station_name) %>% 
   pivot_wider(id_cols = c(Station_name , product) , names_from = model , values_from = residual_CV) %>% 
   # correlation matrix plot
@@ -140,7 +139,7 @@ model_prediction %>%
   group_by(product) %>% 
   group_map(
     ~ .x %>% 
-      GGally::ggpairs(columns = c("SLR" , "GWR" , "RF" , "GBM" , "NN")) +
+      GGally::ggpairs(columns = c("SLR" , "GWR" , "RF" , "XGB" , "LGB" , "NN")) +
       labs(subtitle = .y$product , 
            x = "CV residuals" , y = "CV residuals") +
       theme_bw() +

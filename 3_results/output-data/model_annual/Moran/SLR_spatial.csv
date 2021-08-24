@@ -1,5 +1,5 @@
 name,value,model,product
-Moran_I_statistic,-0.01082733022794634,SLR,spatial
+Moran_I_statistic,-0.011755517701756419,SLR,spatial
 Expectation,-0.010526315789473684,SLR,spatial
-Variance,3.940305477339287e-5,SLR,spatial
-p,0.5191234403233821,SLR,spatial
+Variance,3.94504954070041e-5,SLR,spatial
+p,0.5775785961035385,SLR,spatial
