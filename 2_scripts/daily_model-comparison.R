@@ -13,6 +13,8 @@ library(dplyr) ; library(tidyr)
 library(ggplot2) ; library(ggsci) ; library(ggthemes) ; library(cowplot)
 library(lubridate) ; library(stringr)
 
+source("2_scripts/utils_model-eval.R")
+
 tempres <- "daily"
 
 # =====================================
@@ -44,6 +46,9 @@ model_moran <- list.files(sprintf("3_results/output-data/model_%s/moran" , tempr
 
 # distance from the monitoring sites to the nearest road
 sites_road <- read_csv("1_data/processed/cleaned/extracted/site-road-distance.csv")
+
+# annual data
+data_annual_raw <- read_csv("1_data/processed/cleaned/extracted/annual_scaled.csv")
 
 # =====================================
 # model performance indices
@@ -191,6 +196,69 @@ save_plot(
   plot = last_plot() , 
   base_width = 10 , base_height = 5
 )
+
+
+# =====================================
+# aggragate daily estimation to annual mean
+# =====================================
+# aggregate daily to annual mean
+data_annual_aggregated <- model_prediction %>% 
+  select(model , product , date , Station_name , CV , spatial_CV , predicted , predicted_CV , predicted_spatialCV , predicted_temporalCV) %>% 
+  group_by(model , product , Station_name , CV , spatial_CV) %>% 
+  summarise(across(starts_with("predicted") , mean , na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  left_join(
+    data_annual_raw %>% 
+      select(Station_name , NO2) , 
+    by = "Station_name"
+  )
+# model performace indices on annual average
+model_indices_annual_aggregated <- data_annual_aggregated %>% 
+  # filter(model == "SLR" & product == "OMI") %>% 
+  group_by(model , product) %>% 
+  group_modify( ~ eval_performance_indices(.x)) %>% 
+  ungroup() %>% 
+  mutate(min = ifelse(type == "temporalCV" , NA , min) , 
+         max = ifelse(type == "temporalCV" , NA , max))
+
+# tidy table
+model_compare_tidy_aggregated <- model_indices_annual_aggregated %>% 
+  # round values
+  mutate(across(c(value , min , max) , round , 3)) %>% 
+  # value format: with ranges
+  mutate(across(c(value , min , max) , format , trim = TRUE , digits = 3)) %>% 
+  mutate(value = glue::glue_data(. , "{value} ({min}~{max})") %>% 
+           str_remove_all("\\(NA~NA\\)") %>% str_trim()) %>% 
+  # re-order columns
+  select(model , product , type , name , value) %>% 
+  pivot_wider(names_from = c(type , name) , names_sep = "_" , values_from = value) %>% 
+  # re-order rows
+  arrange(model , product) %>% 
+  # re-order columns
+  select(model , product , 
+         training_R2 , training_RMSE , training_slope , training_intercept , 
+         CV_R2 , CV_RMSE , CV_slope , CV_intercept , 
+         spatialCV_R2 , spatialCV_RMSE , spatialCV_slope , spatialCV_intercept , 
+         temporalCV_R2 , temporalCV_RMSE , temporalCV_slope , temporalCV_intercept)
+# export the tidy table
+model_compare_tidy_aggregated %>% 
+  write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices.csv" , tempres , tempres))
+# tidy table with R2, RMSE, Moran's I
+model_compare_tidy_aggregated %>% 
+  select(model , product , 
+         training_R2 , training_RMSE , 
+         CV_R2 , CV_RMSE , 
+         spatialCV_R2 , spatialCV_RMSE , 
+         temporalCV_R2 , temporalCV_RMSE, starts_with("MoransI")) %>% 
+  write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices_1.csv" , tempres , tempres))
+# tidy table with slope and intercept
+model_compare_tidy_aggregated %>% 
+  select(model , product , 
+         training_slope , training_intercept , 
+         CV_slope , CV_intercept , 
+         spatialCV_slope , spatialCV_intercept , 
+         temporalCV_slope , temporalCV_intercept) %>% 
+  write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices_2.csv" , tempres , tempres))
 
 
 # =====================================

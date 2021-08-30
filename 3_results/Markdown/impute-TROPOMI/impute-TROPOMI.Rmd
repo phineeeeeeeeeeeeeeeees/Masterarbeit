@@ -742,79 +742,125 @@ rf_final
 
 ## Evaluation of the final model
 
-### OOB-$R^2$
-
-```{R}
-rf_final$r.squared
-```
-
-### goodness-of-fit (slope, intercept)
-
+### Full-model-OOB-prediction
 ```{R eval = FALSE}
 rf_final_pred <- rf_final$predictions #OOB-predictions
 rf_final_obs_pred <- modelInput_df %>% 
-  select(x,y,DOY,TROPOMI_NO2) %>% 
+  select(x,y,DOY,TROPOMI_NO2,spatial_CV) %>% 
   rename(obs = TROPOMI_NO2) %>% 
-  mutate(pred = rf_final_pred ) 
+  mutate(pred_OOB = rf_final_pred ) 
 ```
 
-```{R}
-summary(lm(obs ~ pred , data = rf_final_obs_pred))
-```
-
-* slope = 1.03±0.0008  
-* intercept = -6.716e+13 ± 2.470e+12
-
-```{R fig.height = 4}
-rf_final_obs_pred %>% 
-  ggplot(aes(x = pred , y = obs)) +
-  geom_abline(slope = 1 , intercept = 0 , linetype = 2 , color = "azure4") +
-  geom_point(shape = 1 , alpha = 0.5) +
-  geom_smooth(method = "lm") +
-  coord_fixed(1) +
-  labs(x = expression("Modeled TROPOMI-NO"[2]) , y = expression("Observed TROPOMI-NO"[2])) +
-  theme_bw()
-```
-
-
-### cross validation $R^2$
+### cross validation prediction
 ```{R eval = FALSE}
-rf_final_CV_R2_k <- c()
 for(k in 1:k_fold){
   # model
   rf_temp_cv <- ranger(formula_rf_final ,
-                       data = modelInput_df %>% 
+                       data = modelInput_df %>%
                          filter(spatial_CV != as.character(k)) ,
                        importance = "impurity" ,
-                       keep.inbag = TRUE , 
-                       num.trees = rf_final$num.trees , 
+                       keep.inbag = TRUE ,
+                       num.trees = rf_final$num.trees ,
                        mtry = rf_final$mtry)
   # prediction on test set
-  rf_temp_cv_pred <- predict(rf_temp_cv , 
-                             data = modelInput_df %>% 
-                               filter(spatial_CV == as.character(k)) )
-  rf_temp_cv_obs_pred <- modelInput_df %>% 
+  rf_temp_cv_pred <- modelInput_df %>% 
     filter(spatial_CV == as.character(k)) %>% 
-    select(TROPOMI_NO2) %>% 
-    rename(obs = TROPOMI_NO2) %>% 
-    mutate(pred = rf_temp_cv_pred$predictions)
-  # calculate CV-R2
-  rf_final_CV_R2_k[k] <- cor(rf_temp_cv_obs_pred$obs , rf_temp_cv_obs_pred$pred)^2
+    mutate(pred_CV = predict(rf_temp_cv , data = .)$predictions)
+  # save CV prediction
+  if(k == 1){
+    rf_final_obs_pred_cv <- rf_temp_cv_pred
+  }else{ # append
+    rf_final_obs_pred_cv <- rf_final_obs_pred_cv %>% 
+      bind_rows(rf_temp_cv_pred) %>% 
+      select(x,y,DOY,TROPOMI_NO2,spatial_CV,pred_CV)
+  }
   # clean
-  rm(rf_temp_cv , rf_temp_cv_pred , rf_temp_cv_obs_pred)
+  rm(rf_temp_cv , rf_temp_cv_pred)
 }
+# full-model and CV- prediction
+rf_final_obs_pred <- rf_final_obs_pred %>% 
+  inner_join(rf_final_obs_pred_cv , by = c("x" , "y" , "DOY" , "spatial_CV" , "obs"="TROPOMI_NO2"))
+```
+
+### Model performance indices table
+
+```{R eval = FALSE}
+rf_final_indices <- rf_final_obs_pred %>% 
+  # pooled OOB-R2, OOB-MAPE, CV-R2, CV-MAPE
+  summarize(OOB_R2 = cor(obs , pred_OOB)^2 , 
+            OOB_MAPE = Metrics::mape(obs , pred_OOB) , 
+            CV_R2 = cor(obs , pred_CV)^2 , 
+            CV_MAPE = Metrics::mape(obs , pred_CV)) %>% 
+  pivot_longer(cols = everything()) %>% 
+  left_join(
+    rf_final_obs_pred %>% 
+      # CV-fold specific CV-R2, CV-MAPE
+      group_by(spatial_CV) %>% 
+      summarize(CV_R2 = cor(obs , pred_CV)^2 , 
+                CV_MAPE = Metrics::mape(obs , pred_CV)) %>% 
+      ungroup() %>% 
+      pivot_longer(cols = c(CV_R2, CV_MAPE)) %>% 
+      group_by(name) %>% 
+      summarize(min = min(value) , 
+                max = max(value)) , 
+    by = "name"
+  ) %>% 
+  bind_rows(
+    rf_final_obs_pred %>% 
+      pivot_longer(cols = c(pred_OOB , pred_CV) , names_prefix = "pred_" , values_to = "pred" , names_to = "type") %>% 
+      group_by(type) %>% 
+      # slope, intercept
+      group_modify(~ lm(obs~pred , data = .x) %>% broom::tidy()) %>% 
+      ungroup() %>% 
+      select(type , term , estimate , std.error) %>% 
+      # tidy
+      rename(name = term , value = estimate) %>% 
+      mutate(name = str_remove_all(name , "[:punct:]") %>% str_to_lower()) %>% 
+      mutate(name = ifelse(name == "pred" , "slope" , name)) %>% 
+      unite(col = "name" , type , name , sep = "_") %>% 
+      # standard error
+      mutate(min = value - 1.96*std.error , 
+             max = value + 1.96*std.error) %>% 
+      select(-std.error)
+  )
 ```
 
 ```{R}
-# mean CV-R2
-mean(rf_final_CV_R2_k)
+rf_final_indices %>% 
+  filter(!str_detect(name , "intercept")) %>% 
+  # round values
+  mutate(across(c(value , min , max) , round , 3)) %>% 
+  # value format: with ranges
+  mutate(across(c(value , min , max) , format , trim = TRUE , digits = 3 , scientific = FALSE)) %>% 
+  bind_rows(
+    rf_final_indices %>% 
+      filter(str_detect(name , "intercept")) %>% 
+      # value format: with ranges
+      mutate(across(c(value , min , max) , format , trim = TRUE , digits = 3 , scientific = TRUE))
+  ) %>% 
+  mutate(value = glue::glue_data(. , "{value} ({min}~{max})") %>% 
+           str_remove_all("\\(NA~NA\\)") %>% str_trim()) %>% 
+  select(name , value)
 ```
 
 ```{R}
-range(rf_final_CV_R2_k)
+rf_final_obs_pred %>% 
+  pivot_longer(cols = starts_with("pred_") , names_to = "type" , names_prefix = "pred_" , values_to = "pred") %>% 
+  # rename and reorder for visualization
+  mutate(type = ifelse(type == "OOB" , "Full-model-OOB-prediction" , "CV-prediction") %>% 
+           factor(levels = c("Full-model-OOB-prediction" , "CV-prediction"))) %>% 
+  # visualization
+  ggplot(aes(x = pred , y = obs)) +
+  geom_abline(slope = 1 , intercept = 0 , linetype = 2 , color = "azure4") +
+  ggpointdensity::geom_pointdensity(shape = 1 , alpha = 0.5 , adjust = 3e15) +
+  geom_smooth(method = "lm") +
+  scale_color_viridis_c() +
+  facet_grid(~type) +
+  coord_fixed(1) +
+  labs(x = expression("Modeled TROPOMI-NO"[2]) , y = expression("Observed TROPOMI-NO"[2])) +
+  theme_bw() +
+  theme(legend.position = "none")
 ```
-
-10-fold-CV-$R^2$: 0.735 (0.613—0.856)
 
 *** 
 
