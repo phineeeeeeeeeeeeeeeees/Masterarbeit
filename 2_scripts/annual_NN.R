@@ -60,7 +60,7 @@ columns_nonpredictor <- c("Station_name" , "NO2" , "Type_of_zone" , "Type_of_sta
 # //////////////////////////////////////////////////////////////////////////
 model_name <- "Neural network"
 model_abbr <- "NN"
-SAT_product <- c("OMI" , "TROPOMI")[1]
+SAT_product <- c("OMI" , "TROPOMI")[2]
 
 # subset data: satellite-product
 if(SAT_product == "OMI"){
@@ -183,6 +183,13 @@ NN_prediction_training <- training.data %>%
   select(Station_name , NO2 , Type_of_station , X , Y) %>% 
   # prediction
   mutate(predicted = predict(NN , predictor_train)[,1])
+
+# save full-model NN
+out_dirpath_model <- "3_results/output-model/model_annual"
+save_model_hdf5(
+  NN , 
+  sprintf("%s/%s_%s.hdf" , out_dirpath_model , model_abbr , SAT_product)
+)
 
 # =====================================
 # cross validation

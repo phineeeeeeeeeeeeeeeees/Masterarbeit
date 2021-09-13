@@ -44,12 +44,26 @@
       "Repository": "CRAN",
       "Hash": "b56998fff55e4a4b4860ad6e8c67e0f9"
     },
+    "GGally": {
+      "Package": "GGally",
+      "Version": "2.1.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "022f78c8698724b326f1838b1a98cafa"
+    },
     "GWmodel": {
       "Package": "GWmodel",
       "Version": "2.2-6",
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "da7442a6fa80c33965648f6059b1551e"
+    },
+    "HDInterval": {
+      "Package": "HDInterval",
+      "Version": "0.2.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "3b986a53325a1d95610b8d86a284dac0"
     },
     "KernSmooth": {
       "Package": "KernSmooth",
@@ -100,6 +114,20 @@
       "Repository": "CRAN",
       "Hash": "40a55bd0b44719941d103291ac5e9d74"
     },
+    "NeuralNetTools": {
+      "Package": "NeuralNetTools",
+      "Version": "1.5.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "fd388ddd2a7aeb9208c20f2fcb19ea05"
+    },
+    "Ohit": {
+      "Package": "Ohit",
+      "Version": "1.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "2a60e5909103eec2aa2ce0b21a47e23c"
+    },
     "R.methodsS3": {
       "Package": "R.methodsS3",
       "Version": "1.8.1",
@@ -144,10 +172,10 @@
     },
     "Rcpp": {
       "Package": "Rcpp",
-      "Version": "1.0.7",
+      "Version": "1.0.6",
       "Source": "Repository",
       "Repository": "CRAN",
-      "Hash": "dab19adae4440ae55aa8a9d238b246bb"
+      "Hash": "dbb5e436998a7eba5a9d682060533338"
     },
     "RcppArmadillo": {
       "Package": "RcppArmadillo",
@@ -209,13 +237,6 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "e8a22846fff485f0be3770c2da758713"
-    },
-    "astsa": {
-      "Package": "astsa",
-      "Version": "1.13",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Hash": "061c70e6085e869fd4cf8092333e818c"
     },
     "backports": {
       "Package": "backports",
@@ -455,6 +476,13 @@
       "Repository": "CRAN",
       "Hash": "1977b93e52827d46b9be62c82c5e15c6"
     },
+    "distributional": {
+      "Package": "distributional",
+      "Version": "0.2.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "046f2e782ce27c4d08b02e101aa5fee3"
+    },
     "doParallel": {
       "Package": "doParallel",
       "Version": "1.0.16",
@@ -628,12 +656,26 @@
       "Repository": "CRAN",
       "Hash": "bd0785a22c1d8eb187df2d06fab4d906"
     },
+    "ggdist": {
+      "Package": "ggdist",
+      "Version": "3.0.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "88f5fd58f0af7adb1a08ada8d0b37dbe"
+    },
     "ggplot2": {
       "Package": "ggplot2",
       "Version": "3.3.5",
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "d7566c471c7b17e095dd023b9ef155ad"
+    },
+    "ggpointdensity": {
+      "Package": "ggpointdensity",
+      "Version": "0.1.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "8868788d373ea767189d8a5436416e30"
     },
     "ggsci": {
       "Package": "ggsci",
@@ -819,15 +861,10 @@
     },
     "keras": {
       "Package": "keras",
-      "Version": "2.4.0.9000",
-      "Source": "GitHub",
-      "RemoteType": "github",
-      "RemoteHost": "api.github.com",
-      "RemoteRepo": "keras",
-      "RemoteUsername": "rstudio",
-      "RemoteRef": "HEAD",
-      "RemoteSha": "67b3f185315b49644ef6bd7ef26b14aafb2c3bea",
-      "Hash": "f8f1daea6f807d686f686876812cdd45"
+      "Version": "2.4.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "5d2a8af385ee83a4cfcd344d33fe9aab"
     },
     "knitr": {
       "Package": "knitr",
@@ -919,6 +956,13 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "3471fb65971f1a7b2d4ae7848cf2db8d"
+    },
+    "lightgbm": {
+      "Package": "lightgbm",
+      "Version": "3.2.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "aa100baeace1d4cf28ad9f2b93487c53"
     },
     "lme4": {
       "Package": "lme4",
@@ -1270,6 +1314,13 @@
       "Repository": "CRAN",
       "Hash": "079cb1f03ff972b30401ed05623cbe92"
     },
+    "reshape": {
+      "Package": "reshape",
+      "Version": "0.8.8",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "0f4d941129e00ed34a7d192b1da7ccef"
+    },
     "reshape2": {
       "Package": "reshape2",
       "Version": "1.4.4",
@@ -1489,15 +1540,10 @@
     },
     "tensorflow": {
       "Package": "tensorflow",
-      "Version": "2.4.0.9100",
-      "Source": "GitHub",
-      "RemoteType": "github",
-      "RemoteHost": "api.github.com",
-      "RemoteRepo": "tensorflow",
-      "RemoteUsername": "rstudio",
-      "RemoteRef": "HEAD",
-      "RemoteSha": "d549d50e0f06e27cf7cacdbadc732a5ddc8b561e",
-      "Hash": "eaf1b8105d3b34790b91360f6cf7a3a4"
+      "Version": "2.5.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Hash": "b51b9d9ab21c2cc66aeff458aba89a00"
     },
     "tfruns": {
       "Package": "tfruns",

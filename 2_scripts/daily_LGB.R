@@ -478,6 +478,8 @@ save_plot(
 {
   out_dirpath_model <- "3_results/output-model/model_daily"
   if(!dir.exists(out_dirpath_model)) dir.create(out_dirpath_model)
-  saveRDS.lgb.Booster(lgb_final_full , 
-                      file = sprintf("%s/%s_%s.rds" , out_dirpath_model , model_abbr , SAT_product))
+  lgb.save(
+    lgb_final_full , 
+    filename = sprintf("%s/%s_%s.txt" , out_dirpath_model , model_abbr , SAT_product)
+  )
 }

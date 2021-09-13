@@ -12,6 +12,7 @@ library(readr)
 library(dplyr) ; library(tidyr) 
 library(ggplot2) ; library(ggsci) ; library(ggthemes) ; library(cowplot)
 library(lubridate) ; library(stringr)
+library(astsa)
 
 source("2_scripts/utils_model-eval.R")
 
@@ -162,6 +163,61 @@ save_plot(
 )
 
 # =====================================
+# temporal autocorrelation of model residuals 
+# =====================================
+# daily mean residuals (averaged acrossed monitoring sites)
+model_resid_daily <- model_prediction %>% 
+  group_by(model , product , date) %>% 
+  summarize(mean_residual = mean(residual_CV , na.rm = TRUE)) %>% 
+  ungroup()
+
+# residual time series plot
+model_resid_daily %>% 
+  ggplot(aes(x = date , y = mean_residual)) +
+  geom_line(size = 0.3) +
+  geom_smooth(method = "loess" , span = 0.5) +
+  facet_wrap(~ model+product , scales = "free_y" , nrow = 2 , dir = "v") +
+  scale_x_date(breaks = "2 months" , date_labels = "%m") +
+  labs(x = "Time (month)" , y = "Daily mean residuals" , title = "Daily mean CV-residual time series (averaged acrossed sites)") +
+  theme_bw()
+save_plot(
+  sprintf("3_results/output-graph/model_%s/residual_time_series.png" , tempres) , 
+  plot = last_plot() , 
+  base_width = 11 , base_height = 4
+)
+
+# spectral analysis (fast Fourier transformation)
+model_resid_spectrum <- model_resid_daily %>% 
+  group_by(model , product) %>% 
+  # spectral analysis
+  group_modify(
+    ~ .x %>% 
+      select(mean_residual) %>% 
+      unlist() %>% unname() %>% 
+      diff() %>% 
+      ts() %>% 
+      mvspec(spans = 7 , detrend = FALSE , plot = FALSE) %>% 
+      .$details %>% 
+      as_tibble()
+  ) %>% 
+  ungroup()
+
+# spectral density graphs
+model_resid_spectrum %>% 
+  ggplot(aes(x = frequency , y = spectrum)) +
+  geom_line() +
+  facet_wrap(~ model+product , scales = "free_y" , nrow = 2 , dir = "v") +
+  labs(x = "Frequency" , y = "Spectral density" , 
+       title = "Spectral density of the daily mean CV-residual time series (averaged acrossed sites)" , 
+       subtitle = "(First-differenced series; Fast Fourier Transformation; spectral density smoothing bandwidth = 7)") +
+  theme_bw()
+save_plot(
+  sprintf("3_results/output-graph/model_%s/residual_time_series_spectral_density.png" , tempres) , 
+  plot = last_plot() , 
+  base_width = 11 , base_height = 4
+)
+
+# =====================================
 # correlations between different model CV residuals
 # =====================================
 model_prediction %>% 
@@ -248,16 +304,14 @@ model_compare_tidy_aggregated %>%
   select(model , product , 
          training_R2 , training_RMSE , 
          CV_R2 , CV_RMSE , 
-         spatialCV_R2 , spatialCV_RMSE , 
-         temporalCV_R2 , temporalCV_RMSE, starts_with("MoransI")) %>% 
+         spatialCV_R2 , spatialCV_RMSE) %>% 
   write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices_1.csv" , tempres , tempres))
 # tidy table with slope and intercept
 model_compare_tidy_aggregated %>% 
   select(model , product , 
          training_slope , training_intercept , 
          CV_slope , CV_intercept , 
-         spatialCV_slope , spatialCV_intercept , 
-         temporalCV_slope , temporalCV_intercept) %>% 
+         spatialCV_slope , spatialCV_intercept) %>% 
   write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices_2.csv" , tempres , tempres))
 
 
