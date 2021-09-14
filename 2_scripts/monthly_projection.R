@@ -1,7 +1,7 @@
 #####################################################################################################
 # Masterarbeit
 # Modeling
-# Monthly models: mapping
+# Monthly models: projection
 # 2021-09-14
 #####################################################################################################
 
@@ -14,7 +14,7 @@ library(dtplyr) ; library(multidplyr)
 library(dplyr , warn.conflicts = FALSE) ; library(tidyr) 
 library(ggplot2) ; library(ggsci) ; library(ggthemes) ; library(cowplot)
 library(lubridate) ; library(stringr)
-library(GWmodel) ; library(ranger) ; library(xgboost) ; library(lightgbm) ; library(keras)
+library(lme4) ; library(ranger) ; library(xgboost) ; library(lightgbm) ; library(keras)
 
 # =====================================
 # load models
@@ -127,6 +127,7 @@ Zurich_full_df <- read_csv(
 )
 # only mapping the Zurich area
 full_df <- Zurich_full_df
+rm(Zurich_full_df) ; gc()
 
 # =====================================
 # model projections
@@ -293,6 +294,7 @@ projection_NN_TROPOMI <- full_df %>%
 # joining
 # =====================================
 projection <- projection_SLR %>% 
+  full_join(projection_SLMER , by = c("x" , "y" , "month")) %>% 
   full_join(projection_RF , by = c("x" , "y" , "month")) %>% 
   full_join(projection_XGB_OMI , by = c("x" , "y" , "month")) %>% 
   full_join(projection_XGB_TROPOMI, by = c("x" , "y" , "month")) %>% 
@@ -318,18 +320,18 @@ projection_stars <- projection %>%
   merge()
 
 # visualization
-ggplot() +
-  geom_stars(data = projection_stars) +
-  #geom_sf(data = CH , fill = NA , color = "white") +
-  coord_sf(crs = st_crs(2056) , expand = FALSE) +
-  facet_grid(attributes~month) +
-  scale_fill_gradientn(colors = RColorBrewer::brewer.pal(8,"RdYlGn")[8:1] ) +
-  labs(x = "" , y = "" , 
-       title = expression("Model-predicted ground-level NO"[2] * " concentration") ,
-       fill = expression("NO"[2] * " (µg/m"^3 * ")")) +
-  theme_bw() +
-  theme(axis.text = element_text(size = 6) , 
-        axis.text.x = element_text(angle = 90 , vjust = 0.5 , hjust = 1))
+# ggplot() +
+#   geom_stars(data = projection_stars) +
+#   #geom_sf(data = CH , fill = NA , color = "white") +
+#   coord_sf(crs = st_crs(2056) , expand = FALSE) +
+#   facet_grid(attributes~month) +
+#   scale_fill_gradientn(colors = RColorBrewer::brewer.pal(8,"RdYlGn")[8:1] ) +
+#   labs(x = "" , y = "" , 
+#        title = expression("Model-predicted ground-level NO"[2] * " concentration") ,
+#        fill = expression("NO"[2] * " (µg/m"^3 * ")")) +
+#   theme_bw() +
+#   theme(axis.text = element_text(size = 6) , 
+#         axis.text.x = element_text(angle = 90 , vjust = 0.5 , hjust = 1))
 
 # export the projected NO2
 models <- st_get_dimension_values(projection_stars , 4)
