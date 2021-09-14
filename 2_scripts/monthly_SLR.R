@@ -94,7 +94,7 @@ data_monthly_raw <- data_monthly_raw %>%
     .x %>% 
       mutate(month_trans = cos(2 * pi * month/12 + phi))
   }) 
-
+# phi = -0.5593252
 
 # # original <-> transformed month value
 # data_monthly %>% 

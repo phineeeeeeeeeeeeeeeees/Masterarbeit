@@ -190,6 +190,9 @@ save_model_hdf5(
   NN , 
   sprintf("%s/%s_%s.hdf" , out_dirpath_model , model_abbr , SAT_product)
 )
+included_var %>% 
+  as_tibble() %>% 
+  write_csv(sprintf("%s/%s_%s_variables.csv" , out_dirpath_model , model_abbr , SAT_product))
 
 # =====================================
 # cross validation

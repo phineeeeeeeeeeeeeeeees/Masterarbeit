@@ -32,6 +32,8 @@
 /Masterarbeit/analysis/2_scripts/monthly_XGB_gridsearch.R="0F5C98D7"
 /Masterarbeit/analysis/2_scripts/monthly_lmer.R="93EADA64"
 /Masterarbeit/analysis/2_scripts/monthly_model-comparison.R="451A05A4"
+/Masterarbeit/analysis/2_scripts/monthly_projection.R="7A904B6B"
+/Masterarbeit/analysis/2_scripts/projection_Zurich.R="9FF57CB7"
 /Masterarbeit/analysis/2_scripts/spatial-CV.R="625E6712"
 /Masterarbeit/analysis/2_scripts/utils_define-NN.R="9D21FF21"
 /Masterarbeit/analysis/2_scripts/utils_model-eval.R="0FC390EE"

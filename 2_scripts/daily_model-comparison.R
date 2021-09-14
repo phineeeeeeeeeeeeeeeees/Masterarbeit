@@ -171,19 +171,20 @@ model_resid_daily <- model_prediction %>%
   summarize(mean_residual = mean(residual_CV , na.rm = TRUE)) %>% 
   ungroup()
 
+Sys.setlocale(locale = "en_US.UTF-8")
 # residual time series plot
 model_resid_daily %>% 
   ggplot(aes(x = date , y = mean_residual)) +
   geom_line(size = 0.3) +
   geom_smooth(method = "loess" , span = 0.5) +
   facet_wrap(~ model+product , scales = "free_y" , nrow = 2 , dir = "v") +
-  scale_x_date(breaks = "2 months" , date_labels = "%m") +
-  labs(x = "Time (month)" , y = "Daily mean residuals" , title = "Daily mean CV-residual time series (averaged acrossed sites)") +
+  scale_x_date(breaks = "2 months" , date_labels = "%b") +
+  labs(x = "Date" , y = "Daily mean residuals" , title = "Daily mean CV-residual time series (averaged acrossed sites)") +
   theme_bw()
 save_plot(
   sprintf("3_results/output-graph/model_%s/residual_time_series.png" , tempres) , 
   plot = last_plot() , 
-  base_width = 11 , base_height = 4
+  base_width = 13 , base_height = 4
 )
 
 # spectral analysis (fast Fourier transformation)
@@ -214,9 +215,38 @@ model_resid_spectrum %>%
 save_plot(
   sprintf("3_results/output-graph/model_%s/residual_time_series_spectral_density.png" , tempres) , 
   plot = last_plot() , 
-  base_width = 11 , base_height = 4
+  base_width = 13 , base_height = 4
 )
 
+# ACF/PACF plots with S=7
+model_resid_daily %>% 
+  group_by(model , product) %>% 
+  group_modify(
+    ~ .x %>% 
+      select(mean_residual) %>% 
+      unlist() %>% unname() %>% 
+      diff(7) %>% 
+      ts() %>% 
+      acf2(plot = FALSE) %>% 
+      as_tibble() %>% 
+      mutate(lag = 1:n())
+  ) %>% 
+  ungroup() %>% 
+  pivot_longer(cols = c("ACF" , "PACF")) %>% 
+  ggplot(aes(x = lag , y = value)) +
+  geom_vline(xintercept = c(7,14,21,28) , linetype = "dotted" , color = "azure4" , size = 0.4) +
+  geom_bar(stat = "identity") +
+  facet_grid(name ~ model + product) +
+  labs(x = "Lag" , y = "" , 
+       title = "ACF/PACF plots of the daily mean CV-residual time series (averaged acrossed sites)" , 
+       subtitle = "(lag-7-differenced)") +
+  theme_bw()
+save_plot(
+  sprintf("3_results/output-graph/model_%s/residual_time_series_ACF2.png" , tempres) , 
+  plot = last_plot() , 
+  base_width = 13 , base_height = 4
+)
+  
 # =====================================
 # correlations between different model CV residuals
 # =====================================

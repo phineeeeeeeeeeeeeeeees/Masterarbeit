@@ -1775,3 +1775,17 @@
 .Rhistory
 .RData
 .DS_Store
+3_results/output-model/model_annual/NN_OMI.hdf
+3_results/output-model/model_annual/NN_OMI_variables.csv
+3_results/output-model/model_annual/NN_TROPOMI.hdf
+3_results/output-model/model_annual/NN_TROPOMI_variables.csv
+3_results/output-model/model_monthly/LGB_OMI.txt
+3_results/output-model/model_monthly/LGB_TROPOMI.txt
+3_results/output-model/model_monthly/NN_OMI.hdf
+3_results/output-model/model_monthly/NN_OMI_variables.csv
+3_results/output-model/model_monthly/NN_TROPOMI.hdf
+3_results/output-model/model_monthly/NN_TROPOMI_variables.csv
+3_results/output-data/model_monthly/projection_monthly_Zurich/projection_monthly_Zurich.csv
+3_results/output-data/model_annual/projection_annual_Zurich.csv
+1_data/processed/cleaned/data-frame/annual_full_df_Zurich.csv
+1_data/processed/cleaned/data-frame/monthly_full_df_Zurich.csv
