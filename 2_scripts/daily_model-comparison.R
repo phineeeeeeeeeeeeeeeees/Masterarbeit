@@ -208,7 +208,7 @@ model_resid_spectrum %>%
   ggplot(aes(x = frequency , y = spectrum)) +
   geom_line() +
   facet_wrap(~ model+product , scales = "free_y" , nrow = 2 , dir = "v") +
-  labs(x = "Frequency" , y = "Spectral density" , 
+  labs(x = "Frequency (1/day)" , y = "Spectral density" , 
        title = "Spectral density of the daily mean CV-residual time series (averaged acrossed sites)" , 
        subtitle = "(First-differenced series; Fast Fourier Transformation; spectral density smoothing bandwidth = 7)") +
   theme_bw()
@@ -344,6 +344,45 @@ model_compare_tidy_aggregated %>%
          spatialCV_slope , spatialCV_intercept) %>% 
   write_csv(sprintf("3_results/output-data/model_%s/model_%s_aggregated_indices_2.csv" , tempres , tempres))
 
+# =====================================
+# comparison: variable selection
+# =====================================
+model_indices_without_selection <- list.files(sprintf("3_results/output-data/model_%s/indices_without_variable_selection" , tempres) , 
+                                              pattern = ".csv$" , full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
+  bind_rows() %>% 
+  mutate(model = factor(model , levels = c("SLR" , "SLMER" , "RF" , "XGB" , "LGB" , "NN")) , 
+         product = factor(product , levels = c("OMI" , "TROPOMI")))
+
+indices_selection <- model_indices_without_selection %>% 
+  mutate(selection = "without") %>% 
+  bind_rows(
+    model_indices %>% 
+      filter(model %in% c("RF" , "XGB", "LGB" , "NN") & product == "TROPOMI") %>% 
+      mutate(selection = "with")
+  ) %>% 
+  mutate(type = factor(type , levels = c("training" , "CV" , "spatialCV" , "temporalCV")))
+
+indices_selection %>% 
+  filter(name == "R2" & type == "CV") %>% 
+  ggplot(aes(x = model , y = value , group = selection)) +
+  geom_bar(aes(fill = selection) , stat = "identity" , width = 0.5 , position = position_dodge(width = 0.6)) +
+  geom_point(position = position_dodge(width=0.6)) +
+  geom_errorbar(aes(ymin = min , ymax = max) , 
+                color = "black" , position = position_dodge(width=0.6) , width = 0.3) +
+  coord_cartesian(ylim = c(0.2,1)) +
+  scale_fill_solarized() +
+  labs(x = "Model" , y = expression("CV-R"^2) , 
+       title = "Comparison between land-use machine-learning models \nwith and without variable selection" , 
+       subtitle = "Daily models; with TROPOMI" , fill = "Variable selection") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+  
+save_plot(
+  sprintf("3_results/output-graph/model_%s/compare_variable_selection.png" , tempres) , 
+  plot = last_plot() , 
+  base_width = 5.5 , base_height = 4
+)
 
 # =====================================
 # residual diagnostics
